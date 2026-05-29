@@ -33,7 +33,7 @@ fun CredentialDialog(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "https://www.virustotal.com/gui/user-apikey",
+                        "https://www.virustotal.com/gui/user/<your-username>/apikey",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )

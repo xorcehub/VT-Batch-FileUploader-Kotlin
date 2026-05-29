@@ -43,11 +43,13 @@ fun App(store: AppStore = remember { AppStore() }) {
 
                 ButtonBar(
                     modifier = Modifier.fillMaxWidth(),
+                    hasCredentials = state.hasCredentials,
                     onStart = { store.dispatch(AppIntent.StartProcessing) },
                     onPause = { store.dispatch(AppIntent.TogglePause) },
                     onOpenHashed = { store.dispatch(AppIntent.OpenHashedFiles) },
                     onUpload = { store.dispatch(AppIntent.UploadNewFiles) },
-                    onClear = { store.dispatch(AppIntent.ClearList) }
+                    onClear = { store.dispatch(AppIntent.ClearList) },
+                    onShowCredentialDialog = { store.dispatch(AppIntent.ShowCredentialDialog) }
                 )
 
                 // Middle: File list (takes remaining vertical space)
@@ -96,8 +98,8 @@ fun App(store: AppStore = remember { AppStore() }) {
                     CredentialDialog(
                         onDismiss = { store.dispatch(AppIntent.HideCredentialDialog) },
                         onSubmit = { apiKey ->
-                            // Default user to "current" since VT API v3 uses /users/current
-                            store.dispatch(AppIntent.SubmitCredentials(apiKey, "current"))
+                            // VT API v3 uses /users/current endpoint
+                            store.dispatch(AppIntent.SubmitCredentials(apiKey, VT_DEFAULT_USER))
                         }
                     )
                 }

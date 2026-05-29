@@ -226,6 +226,7 @@ object AppReducer {
         is AppIntent.CredentialsInvalid -> state.copy(
             hasCredentials = false,
             isValidatingCredentials = false,
+            showCredentialDialog = true,
             statusLog = state.statusLog + "Credential error: ${intent.message}"
         )
 

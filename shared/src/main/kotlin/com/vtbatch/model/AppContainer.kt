@@ -12,10 +12,12 @@ private val logger = KotlinLogging.logger {}
  */
 class AppContainer(
     apiKey: String? = null,
-    val user: String? = null,
+    user: String? = null,
     val config: AppConfig = AppConfig.default,
 ) {
     private var _apiKey: SecureApiKey? = apiKey?.let { SecureApiKey(it) }
+    private var _user: String? = user
+    val user: String? get() = _user
     private val overrides = mutableMapOf<KClass<*>, Any>()
 
     // Lazy singletons — created on first access, reused after that.
@@ -33,6 +35,8 @@ class AppContainer(
 
     val fileStateManager: FileStateManager by lazy { FileStateManager() }
 
+    val credentialStore: CredentialStore by lazy { CredentialStore() }
+
     val quotaManager: QuotaManager by lazy { QuotaManager(config = config) }
 
     val errorHandler: ErrorHandler by lazy { ErrorHandler() }
@@ -49,12 +53,12 @@ class AppContainer(
         else null
 
     val apiKey: String? get() = _apiKey?.get()
-    val credentialsValid: Boolean get() = _apiKey != null && user != null
+    val credentialsValid: Boolean get() = _apiKey != null && _user != null
 
     fun updateCredentials(apiKey: String, user: String) {
         _apiKey?.clear()
         _apiKey = SecureApiKey(apiKey)
-        // Note: can't reassign val, but VirusTotalApi is created fresh each time via getter
+        _user = user
         logger.info { "Credentials updated for user: $user" }
     }
 

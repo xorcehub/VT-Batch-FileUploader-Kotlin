@@ -45,7 +45,7 @@ sealed class AppIntent {
     object HideCredentialDialog : AppIntent()
 
     /** User submitted credentials via the dialog or command */
-    data class SubmitCredentials(val apiKey: String, val user: String) : AppIntent()
+    data class SubmitCredentials(val apiKey: String, val user: String, val persist: Boolean = true) : AppIntent()
 
     /** Find command — search files by name */
     data class FindFiles(val term: String) : AppIntent()

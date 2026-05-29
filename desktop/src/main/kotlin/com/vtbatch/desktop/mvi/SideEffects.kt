@@ -403,7 +403,7 @@ class SideEffects(
     //  CREDENTIALS
     // ═══════════════════════════════════════════════════════════════════
 
-    fun validateCredentials(apiKey: String, user: String) {
+    fun validateCredentials(apiKey: String, user: String, persist: Boolean = true) {
         scope.launch {
             try {
                 val tempApi = VirusTotalApi(apiKey, config = container.config)
@@ -412,6 +412,7 @@ class SideEffects(
 
                 if (valid) {
                     container.updateCredentials(apiKey, user)
+                    if (persist) container.credentialStore.save(apiKey)
                     dispatch(AppIntent.CredentialsValidated(apiKey, user))
                     fetchQuota()
                 } else {

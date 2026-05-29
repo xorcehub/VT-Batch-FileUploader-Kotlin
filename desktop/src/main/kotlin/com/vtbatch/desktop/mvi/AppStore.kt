@@ -20,7 +20,9 @@ import kotlinx.coroutines.flow.asStateFlow
 // Flow: User action → dispatch(intent) → reducer(newState) → side effects → more intents
 
 class AppStore(
-    val container: AppContainer = AppContainer()
+    apiKey: String? = null,
+    user: String? = null,
+    val container: AppContainer = AppContainer(apiKey = apiKey, user = user)
 ) {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val _state = MutableStateFlow(AppState())
@@ -65,7 +67,7 @@ class AppStore(
             }
 
             is AppIntent.SubmitCredentials -> {
-                sideEffects.validateCredentials(intent.apiKey, intent.user)
+                sideEffects.validateCredentials(intent.apiKey, intent.user, intent.persist)
             }
 
             is AppIntent.SubmitCommand -> {
