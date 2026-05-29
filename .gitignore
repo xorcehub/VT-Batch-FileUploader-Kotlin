@@ -30,3 +30,4 @@ local.properties
 /gradle-*.zip
 
 /docs/
+desktop/suspicious_extensions.json

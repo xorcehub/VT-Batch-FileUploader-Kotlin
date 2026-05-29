@@ -12,7 +12,7 @@ private val logger = KotlinLogging.logger {}
  */
 class AppContainer(
     apiKey: String? = null,
-    private val user: String? = null,
+    val user: String? = null,
     val config: AppConfig = AppConfig.default,
 ) {
     private var _apiKey: SecureApiKey? = apiKey?.let { SecureApiKey(it) }

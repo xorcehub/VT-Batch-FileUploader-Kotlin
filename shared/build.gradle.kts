@@ -27,15 +27,16 @@ dependencies {
 
     // Coroutines — Kotlin's version of async/await. Like Python asyncio but
     // built into the language with structured concurrency.
-    implementation(libs.kotlinx.coroutines.core)
+    api(libs.kotlinx.coroutines.core)
 
     // JSON serialization — annotate a data class with @Serializable and it
-    // can be converted to/from JSON automatically
-    implementation(libs.kotlinx.serialization.json)
+    // can be converted to/from JSON automatically.
+    // Using `api` so downstream modules (desktop, cli) can see JsonObject
+    api(libs.kotlinx.serialization.json)
 
     // Ktor HTTP client — how we'll call the VirusTotal API.
     // Think of it like Python's `requests` library but async-first.
-    implementation(libs.ktor.client.core)
+    api(libs.ktor.client.core)
     implementation(libs.ktor.client.okhttp)
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.json)

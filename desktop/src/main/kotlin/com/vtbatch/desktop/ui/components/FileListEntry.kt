@@ -15,6 +15,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vtbatch.desktop.theme.AppColors
 import com.vtbatch.model.*
+import java.awt.Desktop
+import java.net.URI
 
 // FileListEntry — one row in the file list. Shows filename, size, hash,
 // status, detection ratio, and VT URL. Color-coded by detection result.
@@ -124,7 +126,13 @@ fun FileListEntry(
 
             // VT link button (if analysis is available)
             if (file.analysisUrl != null) {
-                TextButton(onClick = { /* Phase 3: open URL in browser */ }) {
+                TextButton(onClick = {
+                    try {
+                        if (Desktop.isDesktopSupported()) {
+                            Desktop.getDesktop().browse(URI(file.analysisUrl))
+                        }
+                    } catch (_: Exception) { /* ignore browser launch failures */ }
+                }) {
                     Text("Open VT", color = MaterialTheme.colorScheme.primary)
                 }
             }

@@ -66,4 +66,33 @@ object ExtensionsConfig {
 
         return exts
     }
+
+    /** Add an extension to the JSON config file */
+    fun addExtension(ext: String) {
+        val normalized = if (ext.startsWith(".")) ext else ".$ext"
+        val current = loadJsonExtensions().toMutableList()
+        if (normalized !in current) {
+            current.add(normalized)
+            saveJsonExtensions(current)
+        }
+    }
+
+    /** Remove an extension from the JSON config file */
+    fun removeExtension(ext: String) {
+        val normalized = if (ext.startsWith(".")) ext else ".$ext"
+        val current = loadJsonExtensions().toMutableList()
+        if (current.remove(normalized)) {
+            saveJsonExtensions(current)
+        }
+    }
+
+    private fun saveJsonExtensions(extensions: List<String>) {
+        try {
+            val configFile = File("suspicious_extensions.json")
+            val data = ExtensionsFile(extensions)
+            configFile.writeText(json.encodeToString(ExtensionsFile.serializer(), data))
+        } catch (e: Exception) {
+            // Silently fail — extensions will reload from defaults next time
+        }
+    }
 }
