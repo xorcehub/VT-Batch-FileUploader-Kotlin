@@ -36,6 +36,7 @@ dependencies {
     // Ktor HTTP client — how we'll call the VirusTotal API.
     // Think of it like Python's `requests` library but async-first.
     implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.okhttp)
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.json)
 
