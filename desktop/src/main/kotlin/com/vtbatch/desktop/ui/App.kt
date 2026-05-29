@@ -36,6 +36,7 @@ fun App(store: AppStore = remember { AppStore() }) {
                 // Top section: Drop zone + Buttons
                 DropZone(
                     modifier = Modifier.fillMaxWidth(),
+                    isDragOver = state.isDragOver,
                     onDrop = { paths -> store.dispatch(AppIntent.DropFiles(paths)) },
                     onSubmitCommand = { text -> store.dispatch(AppIntent.SubmitCommand(text)) }
                 )

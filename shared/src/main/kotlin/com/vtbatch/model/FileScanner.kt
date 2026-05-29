@@ -36,13 +36,13 @@ class FileScanner(
         return try {
             when {
                 Files.isRegularFile(resolved) -> {
-                    if (resolved.extension.lowercase() in extensions) listOf(resolved.toString())
+                    if (".${resolved.extension.lowercase()}" in extensions) listOf(resolved.toString())
                     else emptyList()
                 }
                 Files.isDirectory(resolved) -> {
                     Files.walk(resolved, FileVisitOption.FOLLOW_LINKS)
                         .filter { it.isRegularFile() }
-                        .filter { it.extension.lowercase() in extensions }
+                        .filter { ".${it.extension.lowercase()}" in extensions }
                         .map { it.toString() }
                         .toList()
                 }

@@ -26,6 +26,12 @@ sealed class AppIntent {
     /** User clicked "Upload" to upload files not found on VT */
     object UploadNewFiles : AppIntent()
 
+    /** Files are being dragged over the window */
+    object DragEnter : AppIntent()
+
+    /** Files were dragged out or dropped */
+    object DragExit : AppIntent()
+
     /** User clicked "Open Hashed" to open analysis URLs in browser */
     object OpenHashedFiles : AppIntent()
 

@@ -56,6 +56,9 @@ data class AppState(
     /** Find command matches */
     val findMatches: FindNavigator.FindMatches = FindNavigator.FindMatches(),
 
+    /** Whether files are being dragged over the window */
+    val isDragOver: Boolean = false,
+
     /** API key available and valid */
     val hasCredentials: Boolean = false
 )

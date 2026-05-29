@@ -49,6 +49,10 @@ object AppReducer {
             )
         }
 
+        is AppIntent.DragEnter -> state.copy(isDragOver = true)
+
+        is AppIntent.DragExit -> state.copy(isDragOver = false)
+
         is AppIntent.UploadNewFiles -> {
             val toUpload = state.files.count {
                 it.status == FileStatus.HASHED_NOT_FOUND && it.md5Hash != null
@@ -127,13 +131,12 @@ object AppReducer {
         // ── Async results ──────────────────────────────────────────────
 
         is AppIntent.FilesScanned -> {
-            val logLines = buildList {
-                add(intent.summary)
-            }
+            // Merge new files with existing ones (by path), new files take precedence
+            val existingMap = state.files.associateBy { it.path }
+            val merged = (existingMap + intent.files.associateBy { it.path }).values.toList()
             state.copy(
-                files = intent.files,
-                hasCredentials = state.hasCredentials, // unchanged
-                statusLog = state.statusLog + logLines
+                files = merged,
+                statusLog = state.statusLog + intent.summary
             )
         }
 
