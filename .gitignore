@@ -1,0 +1,32 @@
+# Gradle
+.gradle/
+build/
+# Keep the wrapper JAR — it's needed to bootstrap Gradle
+
+# IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# VS Code
+.vscode/
+
+# Kotlin
+*.kotlin_module
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build output (but not the Gradle wrapper)
+*.war
+
+# Local config
+local.properties
+
+# Temp Gradle download
+/gradle-*.zip
+
+/docs/
