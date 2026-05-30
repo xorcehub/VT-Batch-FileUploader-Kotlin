@@ -30,11 +30,16 @@ object CrashLogger {
         }
     }
 
-    /** Check for previous crash. Returns crash text or null. */
+    /** Check for previous crash. Returns crash text or null. Bounded to 1MB / 500 lines. */
     fun checkPreviousCrash(): String? {
         return try {
-            if (logFile.exists() && logFile.length() > 0) logFile.readText()
-            else null
+            if (logFile.exists() && logFile.length() > 0) {
+                if (logFile.length() > 1_000_000) {
+                    logFile.readLines().take(500).joinToString("\n")
+                } else {
+                    logFile.readText()
+                }
+            } else null
         } catch (_: Exception) { null }
     }
 

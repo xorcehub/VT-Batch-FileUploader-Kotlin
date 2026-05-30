@@ -70,7 +70,7 @@ private fun envInt(key: String, default: Int): Int {
     }
 }
 
-private fun envFloat(key: String, default: Double): Double {
+private fun envDouble(key: String, default: Double): Double {
     val value = System.getenv(key) ?: return default
     return value.toDoubleOrNull() ?: run {
         logger.warn { "Invalid float for $key: '$value', using default $default" }
@@ -109,7 +109,7 @@ data class AppConfig(
     // Application
     val cacheDurationHours: Int = envInt("VT_CACHE_DURATION_HOURS", CACHE_DURATION_HOURS),
     val cacheFilename: String = envStr("VT_CACHE_FILENAME", CACHE_FILENAME),
-    val refreshThrottleSeconds: Double = envFloat("VT_REFRESH_THROTTLE_SECONDS", REFRESH_THROTTLE_SECONDS),
+    val refreshThrottleSeconds: Double = envDouble("VT_REFRESH_THROTTLE_SECONDS", REFRESH_THROTTLE_SECONDS),
     val maxConcurrentThreads: Int = envInt("VT_MAX_THREADS", MAX_CONCURRENT_THREADS),
 
     // API

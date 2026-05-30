@@ -14,11 +14,17 @@ private val logger = KotlinLogging.logger {}
  */
 object VTResponseParser {
 
+    /** Structured detection stats extracted from a VT response. */
+    data class DetectionStats(
+        val description: String,  // e.g. "2 malicious, 72 total"
+        val ratio: String         // e.g. "2/72"
+    )
+
     /**
      * Extract detection stats from a VT file report response.
-     * Returns (statsString, detectionRatioString) e.g. ("malicious/total", "2/72")
+     * Returns a DetectionStats with a human-readable description and the ratio string.
      */
-    fun extractDetectionStats(json: JsonObject): Pair<String?, String?>? {
+    fun extractDetectionStats(json: JsonObject): DetectionStats? {
         return try {
             val data = json["data"]?.jsonObject
             val attrs = data?.get("attributes")?.jsonObject
@@ -28,7 +34,10 @@ object VTResponseParser {
                 val malicious = lastAnalysis.values.count {
                     it.jsonObject["category"]?.jsonPrimitive?.content == "malicious"
                 }
-                Pair("$malicious/$total", "$malicious/$total")
+                DetectionStats(
+                    description = "$malicious malicious, $total total",
+                    ratio = "$malicious/$total"
+                )
             } else null
         } catch (e: Exception) {
             logger.warn { "Failed to extract detection stats: ${e.message}" }
@@ -38,7 +47,7 @@ object VTResponseParser {
 
     /** Extract detection ratio string from an analysis response */
     fun extractDetectionStatsFromAnalysis(json: JsonObject): String? {
-        return extractDetectionStats(json)?.second
+        return extractDetectionStats(json)?.ratio
     }
 
     /** Extract SHA256 hash from a file report response */

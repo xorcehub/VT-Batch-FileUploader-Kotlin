@@ -2,6 +2,7 @@ package com.vtbatch.desktop.ui.components
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -46,9 +47,10 @@ fun StatusReport(
                     .fillMaxWidth()
                     .heightIn(max = 100.dp)
             ) {
-                items(logLines.size) { index ->
+                items(count = logLines.size, key = { it }) { index ->
+                    val line = logLines[index]
                     Text(
-                        text = "> ${logLines[index]}",
+                        text = "> $line",
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontFamily = FontFamily.Monospace,
                             fontSize = 11.sp

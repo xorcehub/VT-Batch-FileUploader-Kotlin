@@ -1,10 +1,16 @@
 package com.vtbatch.cli
 
 import com.vtbatch.model.*
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.runBlocking
-import picocli.CommandLine.*
+import picocli.CommandLine.Command
+import picocli.CommandLine.Option
+import picocli.CommandLine.Parameters
+import picocli.CommandLine.ParentCommand
 import java.io.File
 import java.util.concurrent.Callable
+
+private val logger = KotlinLogging.logger {}
 
 // ═══════════════════════════════════════════════════════════════════════
 //  EXIT CODES (matching Python)
@@ -17,6 +23,7 @@ object ExitCodes {
     const val AUTH_ERROR = 3
     const val RATE_LIMIT = 4
     const val NETWORK_ERROR = 5
+    const val PARTIAL_SUCCESS = 6
 }
 
 /** Map a VT exception to the correct exit code */
@@ -28,19 +35,21 @@ fun mapExceptionToExitCode(e: Throwable): Int = when (e) {
     else -> ExitCodes.ERROR
 }
 
-/** Resolve API key from args → env vars */
-fun resolveApiKey(cliKey: String?, cliUser: String?): Pair<String?, String?> {
+/** Structured result of API key resolution (Idiom #14) */
+data class ApiKeyResolution(val key: String?, val user: String?)
+
+/** Resolve API key from args and env vars */
+fun resolveApiKey(cliKey: String?, cliUser: String?): ApiKeyResolution {
     val key = cliKey
         ?: System.getenv("VT_API_KEY")
         ?: System.getenv("API_KEY")
     val user = cliUser
         ?: System.getenv("VT_USER")
-        ?: System.getenv("USER")
-    return Pair(key, user)
+    return ApiKeyResolution(key, user)
 }
 
 /** Create a VirusTotalApi instance or exit with auth error */
-fun createApi(key: String?, user: String?, out: OutputFormatter, command: String): VirusTotalApi? {
+fun createApi(key: String?, out: OutputFormatter, command: String): VirusTotalApi? {
     if (key == null) {
         out.error(command, "No API key provided. Use --api-key or set VT_API_KEY.", "ConfigurationError", ExitCodes.AUTH_ERROR)
         return null
@@ -107,7 +116,17 @@ class ScanCommand : Callable<Int> {
 
         val allFiles = mutableListOf<String>()
         for (path in paths) {
-            val found = scanner.getSuspiciousFiles(path)
+            // --no-recursive: only scan single files and top-level directory contents
+            val found = if (noRecursive) {
+                val file = File(path)
+                when {
+                    file.isFile -> scanner.getSuspiciousFiles(path)
+                    file.isDirectory -> file.listFiles()?.filter { it.isFile }?.map { it.absolutePath } ?: emptyList()
+                    else -> emptyList()
+                }
+            } else {
+                scanner.getSuspiciousFiles(path)
+            }
             allFiles.addAll(found)
         }
 
@@ -118,43 +137,45 @@ class ScanCommand : Callable<Int> {
 
         val api = if (computeHashes) {
             val (key, _) = resolveApiKey(parent.apiKey, parent.user)
-            createApi(key, null, out, "scan") ?: return ExitCodes.AUTH_ERROR
+            createApi(key, out, "scan") ?: return ExitCodes.AUTH_ERROR
         } else null
 
-        val fileList = mutableListOf<Map<String, Any?>>()
-        var totalSize = 0L
+        try {
+            val fileList = mutableListOf<Map<String, Any?>>()
+            var totalSize = 0L
 
-        for (filePath in allFiles) {
-            val file = File(filePath)
-            val size = if (file.exists()) file.length() else 0L
-            totalSize += size
+            for (filePath in allFiles) {
+                val file = File(filePath)
+                val size = if (file.exists()) file.length() else 0L
+                totalSize += size
 
-            val entry = mutableMapOf<String, Any?>(
-                "path" to filePath,
-                "size" to size,
-                "extension" to file.extension
-            )
+                val entry = mutableMapOf<String, Any?>(
+                    "path" to filePath,
+                    "size" to size,
+                    "extension" to file.extension
+                )
 
-            if (computeHashes && api != null) {
-                try {
-                    out.progress("Hashing ${file.name}...")
-                    entry["md5_hash"] = api.calculateMd5(filePath)
-                } catch (e: Exception) {
-                    entry["md5_hash"] = null
-                    entry["error"] = e.message
+                if (computeHashes && api != null) {
+                    try {
+                        out.progress("Hashing ${file.name}...")
+                        entry["md5_hash"] = api.calculateMd5(filePath)
+                    } catch (e: Exception) {
+                        entry["md5_hash"] = null
+                        entry["error"] = e.message
+                    }
                 }
+
+                fileList.add(entry)
             }
 
-            fileList.add(entry)
+            out.success("scan",
+                mapOf("files" to fileList),
+                mapOf("files_found" to fileList.size, "total_size_bytes" to totalSize, "total_size_mb" to "%.2f".format(totalSize / (1024.0 * 1024.0)))
+            )
+            return ExitCodes.SUCCESS
+        } finally {
+            api?.close()
         }
-
-        api?.close()
-
-        out.success("scan",
-            mapOf("files" to fileList),
-            mapOf("files_found" to fileList.size, "total_size_bytes" to totalSize, "total_size_mb" to String.format("%.2f", totalSize / (1024.0 * 1024.0)))
-        )
-        return ExitCodes.SUCCESS
     }
 }
 
@@ -178,7 +199,7 @@ class CheckCommand : Callable<Int> {
     override fun call(): Int {
         val out = parent.output
         val (key, _) = resolveApiKey(parent.apiKey, parent.user)
-        val api = createApi(key, null, out, "check") ?: return ExitCodes.AUTH_ERROR
+        val api = createApi(key, out, "check") ?: return ExitCodes.AUTH_ERROR
 
         return try {
             // Determine hash
@@ -201,9 +222,8 @@ class CheckCommand : Callable<Int> {
                         "hash" to hash, "found" to true, "source" to "cache",
                         "filename" to cached.filename, "status" to cached.status,
                         "analysis_url" to cached.url, "detections" to cached.detections,
-                        "last_analysis_date" to cached.last_analysis_date
+                        "last_analysis_date" to cached.lastAnalysisDate
                     ))
-                    api.close()
                     return ExitCodes.SUCCESS
                 }
             }
@@ -217,10 +237,10 @@ class CheckCommand : Callable<Int> {
                 val sha256 = VTResponseParser.extractSha256(result)
                 val lastDate = VTResponseParser.extractLastAnalysisDate(result)
 
-                val data = mutableMapOf<String, Any?>(
+                val data = mapOf<String, Any?>(
                     "hash" to hash, "found" to true, "source" to "virustotal",
                     "analysis_url" to sha256?.let { "https://www.virustotal.com/gui/file/$it" },
-                    "detections" to stats?.second, "last_analysis_date" to lastDate
+                    "detections" to stats?.ratio, "last_analysis_date" to lastDate
                 )
 
                 // Save to cache
@@ -228,10 +248,10 @@ class CheckCommand : Callable<Int> {
                     filename = filePath?.let { File(it).name },
                     path = filePath,
                     url = data["analysis_url"] as? String,
-                    last_scan = java.time.LocalDateTime.now().toString(),
+                    lastScan = java.time.LocalDateTime.now().toString(),
                     status = "found",
-                    last_analysis_date = lastDate,
-                    detections = stats?.second
+                    lastAnalysisDate = lastDate,
+                    detections = stats?.ratio
                 ))
 
                 out.success("check", data)
@@ -272,97 +292,99 @@ class UploadCommand : Callable<Int> {
     override fun call(): Int {
         val out = parent.output
         val (key, _) = resolveApiKey(parent.apiKey, parent.user)
-        val api = createApi(key, null, out, "upload") ?: return ExitCodes.AUTH_ERROR
+        val api = createApi(key, out, "upload") ?: return ExitCodes.AUTH_ERROR
 
-        val results = mutableListOf<Map<String, Any?>>()
-        var uploaded = 0
-        var skipped = 0
-        var failed = 0
+        try {
+            val results = mutableListOf<Map<String, Any?>>()
+            var uploaded = 0
+            var skipped = 0
+            var failed = 0
 
-        for (filePath in files) {
-            val file = File(filePath)
-            if (!file.exists()) {
-                results.add(mapOf("path" to filePath, "uploaded" to false, "error" to "File not found"))
-                failed++
-                continue
-            }
-
-            try {
-                // Compute hash
-                out.progress("Hashing ${file.name}...")
-                val md5 = api.calculateMd5(filePath)
-
-                // Check if already on VT (unless --force)
-                if (!force) {
-                    val existing = runBlocking { api.checkFileOnVirusTotal(md5) }
-                    if (existing != null) {
-                        val sha256 = VTResponseParser.extractSha256(existing)
-                        results.add(mapOf(
-                            "path" to filePath, "uploaded" to false, "skipped" to true,
-                            "reason" to "already_exists", "md5_hash" to md5,
-                            "analysis_url" to sha256?.let { "https://www.virustotal.com/gui/file/$it" }
-                        ))
-                        skipped++
-                        continue
-                    }
+            for (filePath in files) {
+                val file = File(filePath)
+                if (!file.exists()) {
+                    results.add(mapOf("path" to filePath, "uploaded" to false, "error" to "File not found"))
+                    failed++
+                    continue
                 }
 
-                // Upload
-                out.progress("Uploading ${file.name}...")
-                val uploadResult = runBlocking { api.uploadFileToVirusTotal(filePath) }
-                val analysisId = VTResponseParser.extractAnalysisId(uploadResult)
-                val analysisUrl = "https://www.virustotal.com/gui/file-analysis/$analysisId"
+                try {
+                    // Compute hash
+                    out.progress("Hashing ${file.name}...")
+                    val md5 = api.calculateMd5(filePath)
 
-                val entry = mutableMapOf<String, Any?>(
-                    "path" to filePath, "uploaded" to true,
-                    "status" to "uploaded", "md5_hash" to md5, "analysis_url" to analysisUrl
-                )
-
-                // Wait for analysis if requested
-                if (wait && analysisId != null) {
-                    out.progress("Waiting for analysis of ${file.name}...")
-                    val startTime = System.currentTimeMillis()
-                    val maxWaitMs = timeout * 1000L
-
-                    while (System.currentTimeMillis() - startTime < maxWaitMs) {
-                        val analysis = runBlocking { api.getAnalysisResults(analysisId) }
-                        val status = analysis?.let { VTResponseParser.extractAnalysisStatus(it) }
-
-                        if (status == "completed") {
-                            val stats = analysis?.let { VTResponseParser.extractDetectionStatsFromAnalysis(it) }
-                            entry["status"] = "completed"
-                            entry["last_analysis_stats"] = stats
-                            break
+                    // Check if already on VT (unless --force)
+                    if (!force) {
+                        val existing = runBlocking { api.checkFileOnVirusTotal(md5) }
+                        if (existing != null) {
+                            val sha256 = VTResponseParser.extractSha256(existing)
+                            results.add(mapOf(
+                                "path" to filePath, "uploaded" to false, "skipped" to true,
+                                "reason" to "already_exists", "md5_hash" to md5,
+                                "analysis_url" to sha256?.let { "https://www.virustotal.com/gui/file/$it" }
+                            ))
+                            skipped++
+                            continue
                         }
-                        Thread.sleep(10000) // poll every 10s
                     }
 
-                    if (entry["status"] == "uploaded") {
-                        entry["status"] = "timeout"
+                    // Upload
+                    out.progress("Uploading ${file.name}...")
+                    val uploadResult = runBlocking { api.uploadFileToVirusTotal(filePath) }
+                    val analysisId = VTResponseParser.extractAnalysisId(uploadResult)
+                    val analysisUrl = "https://www.virustotal.com/gui/file-analysis/$analysisId"
+
+                    val entry = mutableMapOf<String, Any?>(
+                        "path" to filePath, "uploaded" to true,
+                        "status" to "uploaded", "md5_hash" to md5, "analysis_url" to analysisUrl
+                    )
+
+                    // Wait for analysis if requested
+                    if (wait && analysisId != null) {
+                        out.progress("Waiting for analysis of ${file.name}...")
+                        val startTime = System.currentTimeMillis()
+                        val maxWaitMs = timeout * 1000L
+
+                        while (System.currentTimeMillis() - startTime < maxWaitMs) {
+                            val analysis = runBlocking { api.getAnalysisResults(analysisId) }
+                            val status = analysis?.let { VTResponseParser.extractAnalysisStatus(it) }
+
+                            if (status == "completed") {
+                                val stats = analysis?.let { VTResponseParser.extractDetectionStatsFromAnalysis(it) }
+                                entry["status"] = "completed"
+                                entry["last_analysis_stats"] = stats
+                                break
+                            }
+                            Thread.sleep(10000) // poll every 10s
+                        }
+
+                        if (entry["status"] == "uploaded") {
+                            entry["status"] = "timeout"
+                        }
                     }
+
+                    results.add(entry)
+                    uploaded++
+                } catch (e: Exception) {
+                    results.add(mapOf("path" to filePath, "uploaded" to false, "error" to (e.message ?: "Unknown")))
+                    failed++
                 }
-
-                results.add(entry)
-                uploaded++
-            } catch (e: Exception) {
-                results.add(mapOf("path" to filePath, "uploaded" to false, "error" to (e.message ?: "Unknown")))
-                failed++
             }
+
+            val exitCode = when {
+                failed == files.size -> ExitCodes.ERROR
+                failed > 0 -> ExitCodes.PARTIAL_SUCCESS
+                else -> ExitCodes.SUCCESS
+            }
+
+            out.success("upload",
+                mapOf("files" to results),
+                mapOf("total" to files.size, "uploaded" to uploaded, "skipped" to skipped, "failed" to failed)
+            )
+            return exitCode
+        } finally {
+            api.close()
         }
-
-        api.close()
-
-        val exitCode = when {
-            failed == files.size -> ExitCodes.ERROR
-            failed > 0 -> ExitCodes.NO_RESULTS  // partial success
-            else -> ExitCodes.SUCCESS
-        }
-
-        out.success("upload",
-            mapOf("files" to results),
-            mapOf("total" to files.size, "uploaded" to uploaded, "skipped" to skipped, "failed" to failed)
-        )
-        return exitCode
     }
 }
 
@@ -389,7 +411,7 @@ class ReanalyzeCommand : Callable<Int> {
     override fun call(): Int {
         val out = parent.output
         val (key, _) = resolveApiKey(parent.apiKey, parent.user)
-        val api = createApi(key, null, out, "reanalyze") ?: return ExitCodes.AUTH_ERROR
+        val api = createApi(key, out, "reanalyze") ?: return ExitCodes.AUTH_ERROR
 
         return try {
             val hash = if (filePath != null) {
@@ -462,6 +484,9 @@ class ReanalyzeCommand : Callable<Int> {
 class CacheCommand : Callable<Int> {
     @ParentCommand lateinit var parent: RootCommand
 
+    /** Shared QuotaManager instance for cache subcommands (Idiom #37) */
+    val cache = QuotaManager()
+
     override fun call(): Int {
         parent.output.error("cache", "Specify a cache subcommand: list, get, clear, stats", "InputValidationError", ExitCodes.ERROR)
         return ExitCodes.ERROR
@@ -477,11 +502,10 @@ class CacheListCommand : Callable<Int> {
 
     override fun call(): Int {
         val out = parent.parent.output
-        val cache = QuotaManager()
-        val entries = cache.loadData()
+        val entries = parent.cache.loadData()
 
         val shown = entries.entries.take(limit).map { (hash, entry) ->
-            mapOf("hash" to hash, "filename" to entry.filename, "status" to entry.status, "last_scan" to entry.last_scan)
+            mapOf("hash" to hash, "filename" to entry.filename, "status" to entry.status, "last_scan" to entry.lastScan)
         }
 
         out.success("cache list",
@@ -501,15 +525,14 @@ class CacheGetCommand : Callable<Int> {
 
     override fun call(): Int {
         val out = parent.parent.output
-        val cache = QuotaManager()
-        val entries = cache.loadData()
+        val entries = parent.cache.loadData()
         val entry = entries[hash]
 
         if (entry != null) {
             out.success("cache get", mapOf(
                 "hash" to hash, "found" to true, "filename" to entry.filename,
                 "path" to entry.path, "size" to entry.size, "status" to entry.status,
-                "url" to entry.url, "last_scan" to entry.last_scan, "detections" to entry.detections
+                "url" to entry.url, "last_scan" to entry.lastScan, "detections" to entry.detections
             ))
             return ExitCodes.SUCCESS
         } else {
@@ -525,8 +548,7 @@ class CacheClearCommand : Callable<Int> {
 
     override fun call(): Int {
         val out = parent.parent.output
-        val cache = QuotaManager()
-        cache.clearCache()
+        parent.cache.clearCache()
         out.success("cache clear", mapOf("cleared" to true))
         return ExitCodes.SUCCESS
     }
@@ -538,8 +560,7 @@ class CacheStatsCommand : Callable<Int> {
 
     override fun call(): Int {
         val out = parent.parent.output
-        val cache = QuotaManager()
-        val entries = cache.loadData()
+        val entries = parent.cache.loadData()
 
         val byStatus = entries.values.groupingBy { it.status ?: "unknown" }.eachCount()
 
@@ -577,7 +598,10 @@ class QuotaCommand : Callable<Int> {
                 val monthly = quotas.api_requests_monthly
 
                 val data = mutableMapOf<String, Any?>(
-                    "user_id" to (info.data?.attributes?.let { "user" } ?: "unknown")
+                    "user_id" to (info.data?.attributes?.let { attrs ->
+                        // Extract a meaningful identifier from the API response
+                        attrs.toString().take(50)
+                    } ?: "unknown")
                 )
 
                 val quotasMap = mutableMapOf<String, Any?>()

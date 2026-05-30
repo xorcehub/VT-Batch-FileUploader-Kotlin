@@ -37,7 +37,7 @@ data class QuotaData(
 }
 
 data class ProgressInfo(
-    val percent: Float = 0f,
+    val percent: Double = 0.0,
     val speedFormatted: String = "",     // e.g. "45 MB/s"
     val fileCount: Int = 0,
     val elapsedFormatted: String = ""    // e.g. "2.3s"

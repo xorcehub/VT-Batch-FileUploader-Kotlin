@@ -1,9 +1,11 @@
 package com.vtbatch.model
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
-// System.getenv() used directly
+
+private val logger = KotlinLogging.logger {}
 
 /**
  * Manages the list of suspicious file extensions to scan for.
@@ -31,10 +33,9 @@ object ExtensionsConfig {
     @Serializable
     private data class ExtensionsFile(val extensions: List<String>)
 
-    private fun loadJsonExtensions(): Set<String> {
+    private fun loadJsonExtensions(): Set<String> = synchronized(this) {
         val configFile = File("suspicious_extensions.json")
         if (!configFile.exists()) {
-            // Create default config file
             try {
                 val data = ExtensionsFile(DEFAULT_EXTENSIONS.toList())
                 configFile.writeText(json.encodeToString(ExtensionsFile.serializer(), data))
@@ -48,7 +49,8 @@ object ExtensionsConfig {
             val data = json.decodeFromString(ExtensionsFile.serializer(), configFile.readText())
             data.extensions.map { if (it.startsWith(".")) it else ".$it" }.toSet()
         } catch (e: Exception) {
-            emptySet()
+            logger.warn { "Failed to parse extensions config, using defaults: ${e.message}" }
+            DEFAULT_EXTENSIONS
         }
     }
 
@@ -86,8 +88,7 @@ object ExtensionsConfig {
         }
     }
 
-    private fun saveJsonExtensions(extensions: List<String>) {
-        try {
+    private fun saveJsonExtensions(extensions: List<String>) = synchronized(this) { try {
             val configFile = File("suspicious_extensions.json")
             val data = ExtensionsFile(extensions)
             configFile.writeText(json.encodeToString(ExtensionsFile.serializer(), data))

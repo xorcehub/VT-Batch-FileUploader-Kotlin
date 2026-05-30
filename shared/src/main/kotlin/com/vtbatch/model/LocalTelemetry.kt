@@ -1,10 +1,11 @@
 package com.vtbatch.model
 
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+import java.time.Instant
 
 /**
  * Local-only usage telemetry. All data stays on device in ~/.vtbatch/telemetry.json
@@ -13,6 +14,7 @@ import java.time.format.DateTimeFormatter
 class LocalTelemetry {
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
     private val file = File(System.getProperty("user.home"), ".vtbatch/telemetry.json")
+    private val mutex = Mutex()
 
     @Serializable
     data class TelemetryData(
@@ -30,52 +32,68 @@ class LocalTelemetry {
     private var data = load()
 
     val cacheHitRate: Double
-        get() = if (data.cacheHits + data.cacheMisses > 0)
-            data.cacheHits.toDouble() / (data.cacheHits + data.cacheMisses)
-        else 0.0
+        get() = data.let { d ->
+            if (d.cacheHits + d.cacheMisses > 0)
+                d.cacheHits.toDouble() / (d.cacheHits + d.cacheMisses)
+            else 0.0
+        }
 
-    fun recordCommand(command: String) {
-        val updated = data.commandsUsed.toMutableMap()
-        updated[command] = (updated[command] ?: 0) + 1
-        data = data.copy(commandsUsed = updated)
-        save()
+    suspend fun recordCommand(command: String) {
+        mutex.withLock {
+            val updated = data.commandsUsed.toMutableMap()
+            updated[command] = (updated[command] ?: 0) + 1
+            data = data.copy(commandsUsed = updated)
+            save()
+        }
     }
 
-    fun recordFilesScanned(count: Int) {
-        data = data.copy(filesScanned = data.filesScanned + count)
-        save()
+    suspend fun recordFilesScanned(count: Int) {
+        mutex.withLock {
+            data = data.copy(filesScanned = data.filesScanned + count)
+            save()
+        }
     }
 
-    fun recordCacheHit() {
-        data = data.copy(cacheHits = data.cacheHits + 1)
-        save()
+    suspend fun recordCacheHit() {
+        mutex.withLock {
+            data = data.copy(cacheHits = data.cacheHits + 1)
+            save()
+        }
     }
 
-    fun recordCacheMiss() {
-        data = data.copy(cacheMisses = data.cacheMisses + 1)
-        save()
+    suspend fun recordCacheMiss() {
+        mutex.withLock {
+            data = data.copy(cacheMisses = data.cacheMisses + 1)
+            save()
+        }
     }
 
-    fun recordUploadSuccess() {
-        data = data.copy(uploadSuccesses = data.uploadSuccesses + 1)
-        save()
+    suspend fun recordUploadSuccess() {
+        mutex.withLock {
+            data = data.copy(uploadSuccesses = data.uploadSuccesses + 1)
+            save()
+        }
     }
 
-    fun recordUploadFailure() {
-        data = data.copy(uploadFailures = data.uploadFailures + 1)
-        save()
+    suspend fun recordUploadFailure() {
+        mutex.withLock {
+            data = data.copy(uploadFailures = data.uploadFailures + 1)
+            save()
+        }
     }
 
     fun recordProcessingTime(ms: Long) {
         data = data.copy(totalProcessingTimeMs = data.totalProcessingTimeMs + ms)
     }
 
-    fun recordSession() {
-        data = data.copy(
-            sessionsCount = data.sessionsCount + 1,
-            lastSession = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-        )
-        save()
+    suspend fun recordSession() {
+        mutex.withLock {
+            data = data.copy(
+                sessionsCount = data.sessionsCount + 1,
+                lastSession = Instant.now().toString()
+            )
+            save()
+        }
     }
 
     fun getStats(): TelemetryData = data

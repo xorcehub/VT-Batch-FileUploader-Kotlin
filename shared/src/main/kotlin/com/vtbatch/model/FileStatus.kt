@@ -36,7 +36,9 @@ data class FileEntry(
         get() = when (status) {
             FileStatus.HASHED_FOUND, FileStatus.ANALYSIS_COMPLETE -> {
                 detectionRatio?.let {
-                    val (detections, total) = it.split("/").map { s -> s.trim().toIntOrNull() ?: 0 }
+                    val parts = it.split("/").map { s -> s.trim().toIntOrNull() ?: 0 }
+                    if (parts.size < 2) return@let ColorTag.NEUTRAL
+                    val (detections, _) = parts
                     when {
                         detections == 0 -> ColorTag.CLEAN
                         detections <= 3 -> ColorTag.SUSPICIOUS

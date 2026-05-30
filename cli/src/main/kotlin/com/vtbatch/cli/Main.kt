@@ -1,7 +1,10 @@
 package com.vtbatch.cli
 
 import picocli.CommandLine
-import picocli.CommandLine.*
+import picocli.CommandLine.Command
+import picocli.CommandLine.Option
+import picocli.CommandLine.Parameters
+import picocli.CommandLine.ParentCommand
 import java.util.concurrent.Callable
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -47,8 +50,12 @@ class RootCommand : Callable<Int> {
     /** Lazy-initialized output formatter based on --output flag */
     val output: OutputFormatter by lazy {
         val format = when (outputFormat.lowercase()) {
+            "json" -> OutputFormatter.OutputFormat.JSON
             "text" -> OutputFormatter.OutputFormat.TEXT
-            else -> OutputFormatter.OutputFormat.JSON
+            else -> {
+                System.err.println("Warning: Unknown output format '$outputFormat'. Use 'json' or 'text'. Defaulting to JSON.")
+                OutputFormatter.OutputFormat.JSON
+            }
         }
         OutputFormatter(format)
     }

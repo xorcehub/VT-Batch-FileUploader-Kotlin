@@ -27,7 +27,7 @@ class VirusTotalApi(
     apiKey: String,
     private val rateLimiter: RateLimiter? = null,
     private val config: AppConfig = AppConfig.default
-) {
+) : java.io.Closeable {
     private val secureKey = SecureApiKey(apiKey)
     private val baseUrl = config.apiBaseUrl
 
@@ -41,7 +41,8 @@ class VirusTotalApi(
         }
     }
 
-    val apiKey: String get() = secureKey.get()
+    /** Get the API key for HTTP headers. Internal-only to avoid exposing as immutable String. */
+    internal fun getApiKey(): String = secureKey.get()
 
     fun clearApiKey() = secureKey.clear()
 
@@ -49,7 +50,7 @@ class VirusTotalApi(
     suspend fun validateCredentials(): Boolean {
         return try {
             val response = client.get("$baseUrl/users/current") {
-                header("x-apikey", apiKey)
+                header("x-apikey", getApiKey())
                 timeout { requestTimeoutMillis = 10_000 }
             }
             when (response.status.value) {
@@ -91,7 +92,7 @@ class VirusTotalApi(
 
         return try {
             val response = client.get("$baseUrl/files/$md5Hash") {
-                header("x-apikey", apiKey)
+                header("x-apikey", getApiKey())
                 timeout { requestTimeoutMillis = config.shortTimeout * 1000L }
             }
 
@@ -105,9 +106,7 @@ class VirusTotalApi(
                     context = mapOf("hash" to md5Hash)
                 )
             }
-        } catch (e: APIRateLimitError) { throw e }
-        catch (e: APIResponseError) { throw e }
-        catch (e: java.net.ConnectException) {
+        } catch (e: java.net.ConnectException) {
             throw APIConnectionError("Unable to connect to VirusTotal API", mapOf("hash" to md5Hash), e)
         } catch (e: java.net.SocketTimeoutException) {
             throw APITimeoutError("Request timed out checking hash", mapOf("hash" to md5Hash), e)
@@ -134,7 +133,7 @@ class VirusTotalApi(
                     })
                 }
             ) {
-                header("x-apikey", apiKey)
+                header("x-apikey", getApiKey())
                 timeout { requestTimeoutMillis = config.longTimeout * 1000L }
             }
 
@@ -163,7 +162,7 @@ class VirusTotalApi(
 
         return try {
             val response = client.get("$baseUrl/analyses/$analysisId") {
-                header("x-apikey", apiKey)
+                header("x-apikey", getApiKey())
             }
             when (response.status.value) {
                 200 -> response.body<JsonObject>()
@@ -182,7 +181,7 @@ class VirusTotalApi(
 
         return try {
             val response = client.post("$baseUrl/files/$hash/reanalyse") {
-                header("x-apikey", apiKey)
+                header("x-apikey", getApiKey())
             }
             when (response.status.value) {
                 200 -> response.body<JsonObject>()
@@ -194,7 +193,7 @@ class VirusTotalApi(
         }
     }
 
-    fun close() {
+    override fun close() {
         client.close()
         secureKey.clear()
     }

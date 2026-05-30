@@ -12,6 +12,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 // AppStore = holds the current state and dispatches intents.
 // StateFlow = Kotlin's reactive state holder (like a Python observable).
@@ -24,7 +25,7 @@ class AppStore(
     user: String? = null,
     val container: AppContainer = AppContainer(apiKey = apiKey, user = user)
 ) {
-    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val _state = MutableStateFlow(AppState())
     val state: StateFlow<AppState> = _state.asStateFlow()
 
@@ -35,12 +36,13 @@ class AppStore(
 
     /** Dispatch an intent → reduce to new state → trigger side effects */
     fun dispatch(intent: AppIntent) {
-        val currentState = _state.value
-        val newState = AppReducer.reduce(currentState, intent)
-        _state.value = newState
-
-        // Trigger side effects based on the intent
-        triggerSideEffects(intent, newState)
+        var reducedState: AppState? = null
+        _state.update { current ->
+            val new = AppReducer.reduce(current, intent)
+            reducedState = new
+            new
+        }
+        triggerSideEffects(intent, reducedState!!)
     }
 
     /** Map intents to their side effects */
@@ -100,7 +102,6 @@ class AppStore(
  */
 @Composable
 fun AppStore.collectState(): androidx.compose.runtime.State<AppState> {
-    val state by this.state.collectAsState()
     DisposableEffect(this) {
         onDispose { /* store lifetime > composable lifetime, no cleanup needed */ }
     }

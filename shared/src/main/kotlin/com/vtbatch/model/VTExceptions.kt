@@ -1,9 +1,10 @@
 package com.vtbatch.model
 
 // Exception hierarchy matching the Python version exactly.
-// "sealed class" in Kotlin = a restricted class hierarchy where all subclasses
-// are known at compile time. The compiler guarantees exhaustive `when` checks.
-// "open class" would also work but sealed is more Kotlin-idiomatic for this.
+// Note: This uses "open class" (not "sealed class"). A sealed hierarchy would
+// give exhaustive `when` checking, but is not used here because the exceptions
+// live across multiple files and need to be extensible by downstream modules.
+// Tradeoff: no compile-time exhaustiveness guarantee, but more flexible hierarchy.
 
 // Base exception — all custom errors inherit from this.
 // Like Python's VTBatchError with message, context dict, and original_error.

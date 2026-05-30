@@ -10,33 +10,37 @@ import com.vtbatch.model.*
 
 object AppReducer {
 
+    private const val MAX_LOG_SIZE = 500
+
+    private fun List<String>.append(message: String): List<String> =
+        (this + message).takeLast(MAX_LOG_SIZE)
+
     fun reduce(state: AppState, intent: AppIntent): AppState = when (intent) {
         // ── User actions ────────────────────────────────────────────────
 
         is AppIntent.DropFiles -> state.copy(
-            statusLog = state.statusLog + "Scanning dropped paths..."
+            statusLog = state.statusLog.append("Scanning dropped paths...")
         )
 
         is AppIntent.SubmitCommand -> state.copy(
-            statusLog = state.statusLog + "> ${intent.text}"
+            statusLog = state.statusLog.append("> ${intent.text}")
         )
 
         is AppIntent.StartProcessing -> {
+            // Align count with SideEffects.processFiles filter
             val toProcess = state.files.count {
-                it.status == FileStatus.PENDING ||
-                it.status == FileStatus.HASHED_NOT_FOUND ||
-                (it.analysisUrl == null && it.md5Hash != null)
+                it.status == FileStatus.PENDING && it.md5Hash != null
             }
             if (toProcess == 0) {
                 state.copy(
-                    statusLog = state.statusLog + "No files to process."
+                    statusLog = state.statusLog.append("No files to process.")
                 )
             } else {
                 state.copy(
                     isProcessing = true,
                     hashingProgress = ProgressInfo(),
                     totalProgress = ProgressInfo(),
-                    statusLog = state.statusLog + "Starting processing for $toProcess file(s)..."
+                    statusLog = state.statusLog.append("Starting processing for $toProcess file(s)...")
                 )
             }
         }
@@ -45,7 +49,7 @@ object AppReducer {
             val newPaused = !state.isPaused
             state.copy(
                 isPaused = newPaused,
-                statusLog = state.statusLog + if (newPaused) "Paused." else "Resumed."
+                statusLog = state.statusLog.append(if (newPaused) "Paused." else "Resumed.")
             )
         }
 
@@ -59,14 +63,14 @@ object AppReducer {
             }
             if (toUpload == 0) {
                 state.copy(
-                    statusLog = state.statusLog + "No files to upload (all found on VT or no hash)."
+                    statusLog = state.statusLog.append("No files to upload (all found on VT or no hash).")
                 )
             } else {
                 state.copy(
                     isUploading = true,
                     uploadProgress = ProgressInfo(),
                     totalProgress = ProgressInfo(),
-                    statusLog = state.statusLog + "Uploading $toUpload file(s)..."
+                    statusLog = state.statusLog.append("Uploading $toUpload file(s)...")
                 )
             }
         }
@@ -74,7 +78,7 @@ object AppReducer {
         is AppIntent.OpenHashedFiles -> {
             val withUrl = state.files.count { it.analysisUrl != null }
             state.copy(
-                statusLog = state.statusLog + "Opening $withUrl file(s) in browser..."
+                statusLog = state.statusLog.append("Opening $withUrl file(s) in browser...")
             )
         }
 
@@ -87,7 +91,7 @@ object AppReducer {
             totalProgress = ProgressInfo(),
             currentFile = null,
             currentStatus = null,
-            statusLog = state.statusLog + "List cleared.",
+            statusLog = state.statusLog.append("List cleared."),
             findMatches = FindNavigator.FindMatches()
         )
 
@@ -103,7 +107,7 @@ object AppReducer {
         is AppIntent.SubmitCredentials -> state.copy(
             isValidatingCredentials = true,
             showCredentialDialog = false,
-            statusLog = state.statusLog + "Validating credentials..."
+            statusLog = state.statusLog.append("Validating credentials...")
         )
 
         is AppIntent.FindFiles -> {
@@ -119,7 +123,7 @@ object AppReducer {
             }
             state.copy(
                 findMatches = matches,
-                statusLog = state.statusLog + logMsg
+                statusLog = state.statusLog.append(logMsg)
             )
         }
 
@@ -136,7 +140,7 @@ object AppReducer {
             val merged = (existingMap + intent.files.associateBy { it.path }).values.toList()
             state.copy(
                 files = merged,
-                statusLog = state.statusLog + intent.summary
+                statusLog = state.statusLog.append(intent.summary)
             )
         }
 
@@ -172,7 +176,7 @@ object AppReducer {
             files = state.files.map {
                 if (it.path == intent.path) intent.updatedEntry else it
             },
-            statusLog = state.statusLog + "Analysis complete: ${intent.updatedEntry.fileName}"
+            statusLog = state.statusLog.append("Analysis complete: ${intent.updatedEntry.fileName}")
         )
 
         is AppIntent.AnalysisTimeout -> state.copy(
@@ -182,13 +186,13 @@ object AppReducer {
                     errorMessage = "Analysis timed out"
                 ) else it
             },
-            statusLog = state.statusLog + "Analysis timed out for ${state.files.find { it.path == intent.path }?.fileName ?: intent.path}"
+            statusLog = state.statusLog.append("Analysis timed out for ${state.files.find { it.path == intent.path }?.fileName ?: intent.path}")
         )
 
         is AppIntent.HashingProgress -> state.copy(
             hashingProgress = ProgressInfo(
-                percent = intent.percent,
-                speedFormatted = "${String.format("%.1f", intent.speedMbps)} MB/s",
+                percent = intent.percent.toDouble(),
+                speedFormatted = "%.1f MB/s".format(intent.speedMbps),
                 fileCount = intent.fileCount,
                 elapsedFormatted = intent.elapsedFormatted
             )
@@ -196,15 +200,15 @@ object AppReducer {
 
         is AppIntent.UploadSpeed -> state.copy(
             uploadProgress = ProgressInfo(
-                percent = state.uploadProgress.percent,
-                speedFormatted = "${String.format("%.1f", intent.speedMbps)} MB/s",
+                percent = intent.percent.toDouble(),
+                speedFormatted = "%.1f MB/s".format(intent.speedMbps),
                 fileCount = intent.fileCount,
                 elapsedFormatted = intent.elapsedFormatted
             )
         )
 
         is AppIntent.TotalProgress -> state.copy(
-            totalProgress = state.totalProgress.copy(percent = intent.percent)
+            totalProgress = state.totalProgress.copy(percent = intent.percent.toDouble())
         )
 
         is AppIntent.QuotaUpdated -> state.copy(
@@ -220,14 +224,14 @@ object AppReducer {
         is AppIntent.CredentialsValidated -> state.copy(
             hasCredentials = true,
             isValidatingCredentials = false,
-            statusLog = state.statusLog + "Credentials validated successfully."
+            statusLog = state.statusLog.append("Credentials validated successfully.")
         )
 
         is AppIntent.CredentialsInvalid -> state.copy(
             hasCredentials = false,
             isValidatingCredentials = false,
             showCredentialDialog = true,
-            statusLog = state.statusLog + "Credential error: ${intent.message}"
+            statusLog = state.statusLog.append("Credential error: ${intent.message}")
         )
 
         is AppIntent.FilesUpdated -> state.copy(
@@ -235,11 +239,11 @@ object AppReducer {
         )
 
         is AppIntent.LogMessage -> state.copy(
-            statusLog = state.statusLog + intent.message
+            statusLog = state.statusLog.append(intent.message)
         )
 
         is AppIntent.Error -> state.copy(
-            statusLog = state.statusLog + "ERROR: ${intent.message}",
+            statusLog = state.statusLog.append("ERROR: ${intent.message}"),
             isProcessing = if (state.isProcessing) {
                 // Only clear processing if there are no more files being worked on
                 state.files.none { it.status == FileStatus.HASHING || it.status == FileStatus.PENDING }
@@ -250,14 +254,14 @@ object AppReducer {
             isProcessing = false,
             currentFile = null,
             currentStatus = null,
-            statusLog = state.statusLog + "Processing complete."
+            statusLog = state.statusLog.append("Processing complete.")
         )
 
         is AppIntent.UploadCompleted -> state.copy(
             isUploading = false,
             currentFile = null,
             currentStatus = null,
-            statusLog = state.statusLog + "Upload batch complete."
+            statusLog = state.statusLog.append("Upload batch complete.")
         )
     }
 }

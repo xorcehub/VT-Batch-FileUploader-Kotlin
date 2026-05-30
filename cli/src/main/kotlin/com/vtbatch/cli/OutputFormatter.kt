@@ -1,8 +1,10 @@
 package com.vtbatch.cli
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.json.*
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+import java.time.Instant
+
+private val logger = KotlinLogging.logger {}
 
 /**
  * Formats CLI output as JSON or human-readable text.
@@ -13,7 +15,7 @@ class OutputFormatter(private val format: OutputFormat = OutputFormat.JSON) {
     enum class OutputFormat { JSON, TEXT }
 
     /** Print a successful result */
-    fun success(command: String, data: Map<String, Any?> = emptyMap(), summary: Map<String, Any?>? = null) {
+    fun success(command: String, data: Map<String, Any?> = emptyMap(), summary: Map<String, Any?> = emptyMap()) {
         when (format) {
             OutputFormat.JSON -> printJson(command, data, summary)
             OutputFormat.TEXT -> printText(command, data, summary)
@@ -56,24 +58,24 @@ class OutputFormatter(private val format: OutputFormat = OutputFormat.JSON) {
         }
     }
 
-    private fun printJson(command: String, data: Map<String, Any?>, summary: Map<String, Any?>?) {
+    private fun printJson(command: String, data: Map<String, Any?>, summary: Map<String, Any?>) {
         val obj = buildJsonObject {
             put("success", true)
             put("command", command)
             put("timestamp", timestamp())
-            put("data", data.toJsonElement().jsonObject)
-            if (summary != null) {
-                put("summary", summary.toJsonElement().jsonObject)
+            put("data", toJsonElement(data).jsonObject)
+            if (summary.isNotEmpty()) {
+                put("summary", toJsonElement(summary).jsonObject)
             }
             put("errors", buildJsonArray {})
         }
         println(obj.toJsonString())
     }
 
-    private fun printText(command: String, data: Map<String, Any?>, summary: Map<String, Any?>?) {
+    private fun printText(command: String, data: Map<String, Any?>, summary: Map<String, Any?>) {
         println("[OK] $command")
         printDataMap(data, indent = 1)
-        if (summary != null) {
+        if (summary.isNotEmpty()) {
             println("Summary:")
             printDataMap(summary, indent = 1)
         }
@@ -107,30 +109,35 @@ class OutputFormatter(private val format: OutputFormat = OutputFormat.JSON) {
     }
 
     companion object {
-        fun timestamp(): String = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+        internal val PRETTY_JSON = Json { prettyPrint = true }
+
+        fun timestamp(): String = Instant.now().toString()
     }
 }
 
 // ── Extension: convert Any? to JsonElement ────────────────────────────
 
-private fun Any?.toJsonElement(): JsonElement = when (this) {
+private fun toJsonElement(value: Any?): JsonElement = when (value) {
     null -> JsonNull
-    is JsonElement -> this
-    is Boolean -> JsonPrimitive(this)
-    is Number -> JsonPrimitive(this)
-    is String -> JsonPrimitive(this)
+    is JsonElement -> value
+    is Boolean -> JsonPrimitive(value)
+    is Number -> JsonPrimitive(value)
+    is String -> JsonPrimitive(value)
     is Map<*, *> -> buildJsonObject {
         @Suppress("UNCHECKED_CAST")
-        for ((k, v) in (this@toJsonElement as Map<String, Any?>)) {
-            put(k, v.toJsonElement())
+        for ((k, v) in (value as Map<String, Any?>)) {
+            put(k, toJsonElement(v))
         }
     }
     is List<*> -> buildJsonArray {
-        for (item in this@toJsonElement) {
-            add(item.toJsonElement())
+        for (item in value) {
+            add(toJsonElement(item))
         }
     }
-    else -> JsonPrimitive(toString())
+    else -> {
+        logger.warn { "Serializing unknown type ${value.javaClass.simpleName} via toString()" }
+        JsonPrimitive(value.toString())
+    }
 }
 
-private fun JsonObject.toJsonString(): String = Json { prettyPrint = true }.encodeToString(JsonObject.serializer(), this)
+private fun JsonObject.toJsonString(): String = OutputFormatter.PRETTY_JSON.encodeToString(JsonObject.serializer(), this)

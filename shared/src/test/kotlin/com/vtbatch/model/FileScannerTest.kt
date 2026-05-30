@@ -1,20 +1,14 @@
 package com.vtbatch.model
 
 import java.io.File
+import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class FileScannerTest {
 
-    private val tmpDir = createTempDir("vtbatch_test")
-
-    private fun createTempDir(prefix: String): File {
-        val dir = File(System.getProperty("java.io.tmpdir"), "$prefix${System.nanoTime()}")
-        dir.mkdirs()
-        dir.deleteOnExit()
-        return dir
-    }
+    private val tmpDir: File = createTempDirectory("filescanner").toFile()
 
     private fun createFile(name: String, parent: File = tmpDir): File {
         val file = File(parent, name)

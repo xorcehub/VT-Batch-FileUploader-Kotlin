@@ -44,7 +44,7 @@ class ErrorHandler {
         is FileAnalysisError -> "Analysis failed: ${error.message}"
         is CacheError -> "Cache error: ${error.message}"
         is ConfigurationError -> "Configuration error: ${error.message}"
-        is VTBatchError -> error.message
-        else -> "An unexpected error occurred: ${error.message}"
+        is VTBatchError -> error.message ?: "Unknown error"
+        else -> "An unexpected error occurred: ${error.message ?: "Unknown error"}"
     }
 }

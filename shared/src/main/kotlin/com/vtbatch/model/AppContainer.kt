@@ -1,7 +1,6 @@
 package com.vtbatch.model
 
 import io.github.oshai.kotlinlogging.KotlinLogging
-import kotlin.reflect.KClass
 
 private val logger = KotlinLogging.logger {}
 
@@ -15,10 +14,9 @@ class AppContainer(
     user: String? = null,
     val config: AppConfig = AppConfig.default,
 ) {
-    private var _apiKey: SecureApiKey? = apiKey?.let { SecureApiKey(it) }
-    private var _user: String? = user
+    @Volatile private var _apiKey: SecureApiKey? = apiKey?.let { SecureApiKey(it) }
+    @Volatile private var _user: String? = user
     val user: String? get() = _user
-    private val overrides = mutableMapOf<KClass<*>, Any>()
 
     // Lazy singletons — created on first access, reused after that.
     // Kotlin `by lazy` = thread-safe lazy initialization (like Python's @property with caching)
@@ -47,10 +45,23 @@ class AppContainer(
 
     val telemetry: LocalTelemetry by lazy { LocalTelemetry() }
 
+    // Cached VirusTotalApi - invalidated when credentials change
+    @Volatile private var _cachedApi: VirusTotalApi? = null
+    @Volatile private var _cachedApiKeyValue: String? = null
+
     val virusTotalApi: VirusTotalApi?
-        get() = if (credentialsValid && _apiKey != null)
-            VirusTotalApi(_apiKey!!.get(), rateLimiter, config)
-        else null
+        get() {
+            // Capture volatile field in local val to avoid TOCTOU race
+            val key = _apiKey
+            if (key == null || _user == null) return null
+            val currentKey = key.get()
+            if (_cachedApi == null || _cachedApiKeyValue != currentKey) {
+                _cachedApi?.close()
+                _cachedApi = VirusTotalApi(currentKey, rateLimiter, config)
+                _cachedApiKeyValue = currentKey
+            }
+            return _cachedApi
+        }
 
     val apiKey: String? get() = _apiKey?.get()
     val credentialsValid: Boolean get() = _apiKey != null && _user != null
@@ -59,14 +70,15 @@ class AppContainer(
         _apiKey?.clear()
         _apiKey = SecureApiKey(apiKey)
         _user = user
+        _cachedApi?.close()
+        _cachedApi = null
+        _cachedApiKeyValue = null
         logger.info { "Credentials updated for user: $user" }
     }
 
-    fun <T : Any> override(cls: KClass<T>, instance: T) {
-        overrides[cls] = instance
-    }
-
     fun shutdown() {
+        _cachedApi?.close()
+        _cachedApi = null
         _apiKey?.clear()
     }
 }

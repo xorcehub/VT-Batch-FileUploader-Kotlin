@@ -90,6 +90,7 @@ sealed class AppIntent {
 
     /** Overall upload progress / speed */
     data class UploadSpeed(
+        val percent: Float,
         val speedMbps: Float,
         val fileCount: Int,
         val elapsedFormatted: String

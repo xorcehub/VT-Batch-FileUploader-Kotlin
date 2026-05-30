@@ -40,11 +40,12 @@ class FileScanner(
                     else emptyList()
                 }
                 Files.isDirectory(resolved) -> {
-                    Files.walk(resolved, FileVisitOption.FOLLOW_LINKS)
-                        .filter { it.isRegularFile() }
-                        .filter { ".${it.extension.lowercase()}" in extensions }
-                        .map { it.toString() }
-                        .toList()
+                    Files.walk(resolved, FileVisitOption.FOLLOW_LINKS).use { stream ->
+                        stream.filter { it.isRegularFile() }
+                            .filter { ".${it.extension.lowercase()}" in extensions }
+                            .map { it.toString() }
+                            .toList()
+                    }
                 }
                 else -> emptyList()
             }.also { files ->

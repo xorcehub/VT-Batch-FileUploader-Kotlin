@@ -38,40 +38,40 @@ class RateLimiter(
             }
         }
 
-        return mutex.withLock {
+        // Compute wait time under the lock, then delay outside it so other
+        // coroutines can call tryAcquire / getWaitTime while we sleep.
+        val waitTime = mutex.withLock {
             val now = currentTime()
-            var waitTime = 0.0
+            var wait = 0.0
 
-            // Enforce minimum interval
             val timeSinceLast = now - lastRequestTime
-            if (timeSinceLast < minIntervalSec) {
-                waitTime = minIntervalSec - timeSinceLast
-            }
+            if (timeSinceLast < minIntervalSec) wait = minIntervalSec - timeSinceLast
 
-            // Remove old entries (older than 1 minute)
             val cutoff = now - 60.0
             while (requestTimes.isNotEmpty() && requestTimes.first() < cutoff) {
                 requestTimes.removeFirst()
             }
 
-            // Check rate limit
             if (requestTimes.size >= requestsPerMinute) {
                 val oldest = requestTimes.first()
                 val additionalWait = (oldest + 60.0) - now
-                if (additionalWait > 0) {
-                    waitTime = maxOf(waitTime, additionalWait)
-                }
+                if (additionalWait > 0) wait = maxOf(wait, additionalWait)
             }
 
-            if (waitTime > 0) {
-                logger.debug { "Rate limiter: waiting ${"%.2f".format(waitTime)}s" }
-                delay((waitTime * 1000).toLong())
-            }
+            wait
+        }
 
+        if (waitTime > 0) {
+            logger.debug { "Rate limiter: waiting ${"%.2f".format(waitTime)}s" }
+            delay((waitTime * 1000).toLong())
+        }
+
+        mutex.withLock {
             lastRequestTime = currentTime()
             requestTimes.addLast(lastRequestTime)
-            waitTime
         }
+
+        return waitTime
     }
 
     /** Try to acquire without waiting. Returns true if allowed. */

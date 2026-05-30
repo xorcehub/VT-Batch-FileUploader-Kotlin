@@ -3,7 +3,9 @@ package com.vtbatch.model
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import io.github.oshai.kotlinlogging.KotlinLogging
+import java.util.concurrent.CopyOnWriteArrayList
 
 private val logger = KotlinLogging.logger {}
 
@@ -16,8 +18,8 @@ class PauseController {
     private val _isPaused = MutableStateFlow(false)
     val isPausedFlow: StateFlow<Boolean> = _isPaused.asStateFlow()
 
-    // Callbacks for pause state changes
-    private val callbacks = mutableListOf<(Boolean) -> Unit>()
+    // CopyOnWriteArrayList for thread-safe callback management
+    private val callbacks = CopyOnWriteArrayList<(Boolean) -> Unit>()
 
     val isPaused: Boolean get() = _isPaused.value
 
@@ -43,11 +45,11 @@ class PauseController {
         return _isPaused.value
     }
 
-    /** Suspend caller if paused — like Python's wait_if_paused */
+    /** Suspend caller until unpaused — instant response via StateFlow. */
     suspend fun waitIfPaused() {
-        // In coroutine world, we just check the flow.
-        // The caller should check isPaused in their processing loop.
-        // Actual suspension is handled by the caller's coroutine scope.
+        if (_isPaused.value) {
+            isPausedFlow.first { !it }
+        }
     }
 
     fun addPauseChangeCallback(callback: (Boolean) -> Unit) {

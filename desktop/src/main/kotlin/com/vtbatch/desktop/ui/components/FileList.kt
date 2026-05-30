@@ -22,7 +22,7 @@ fun FileList(
         verticalArrangement = Arrangement.spacedBy(4.dp),
         contentPadding = PaddingValues(vertical = 4.dp)
     ) {
-        items(files) { file ->
+        items(files, key = { it.path }) { file ->
             FileListEntry(file = file)
         }
     }

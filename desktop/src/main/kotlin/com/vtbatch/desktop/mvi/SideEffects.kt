@@ -33,13 +33,17 @@ class SideEffects(
     private val scope: CoroutineScope
 ) {
     private val scanner = FileScanner()
+    private var scanJob: Job? = null
+    private var processJob: Job? = null
+    private var uploadJob: Job? = null
 
     // ═══════════════════════════════════════════════════════════════════
     //  FILE SCANNING (DropFiles)
     // ═══════════════════════════════════════════════════════════════════
 
     fun scanFiles(paths: List<String>) {
-        scope.launch {
+        scanJob?.cancel()
+        scanJob = scope.launch {
             try {
                 val allSuspicious = mutableSetOf<String>()
                 for (path in paths) {
@@ -101,7 +105,7 @@ class SideEffects(
                             status = FileStatus.HASHED_FOUND,
                             analysisUrl = cached.url,
                             detectionRatio = cached.detections,
-                            lastAnalysisDate = cached.last_analysis_date?.let { formatTimestamp(it) }
+                            lastAnalysisDate = cached.lastAnalysisDate?.let { formatTimestamp(it) }
                         ))
                     } else {
                         newCount++
@@ -151,7 +155,8 @@ class SideEffects(
     // ═══════════════════════════════════════════════════════════════════
 
     fun processFiles(files: List<FileEntry>) {
-        scope.launch {
+        processJob?.cancel()
+        processJob = scope.launch {
             val toProcess = files.filter {
                 it.status == FileStatus.PENDING && it.md5Hash != null
             }
@@ -173,9 +178,7 @@ class SideEffects(
 
             for (entry in toProcess) {
                 // Check pause
-                while (container.pauseController.isPaused) {
-                    delay(500)
-                }
+                container.pauseController.waitIfPaused()
 
                 val fileName = File(entry.path).name
                 dispatch(AppIntent.CurrentProcessingChanged(fileName, "Checking hash on VT..."))
@@ -198,11 +201,11 @@ class SideEffects(
                                 size = entry.fileSizeBytes,
                                 path = entry.path,
                                 url = "https://www.virustotal.com/gui/file/$sha256",
-                                last_scan = LocalDateTime.now().toString(),
+                                lastScan = LocalDateTime.now().toString(),
                                 status = "found",
-                                last_analysis_stats = stats?.first,
-                                last_analysis_date = lastDate,
-                                detections = stats?.second
+                                lastAnalysisStats = stats?.description,
+                                lastAnalysisDate = lastDate,
+                                detections = stats?.ratio
                             ))
                         }
 
@@ -210,7 +213,7 @@ class SideEffects(
                             status = FileStatus.HASHED_FOUND,
                             sha256Hash = sha256,
                             analysisUrl = "https://www.virustotal.com/gui/file/$sha256",
-                            detectionRatio = stats?.second,
+                            detectionRatio = stats?.ratio,
                             lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
                         )
                     } else {
@@ -257,7 +260,8 @@ class SideEffects(
     // ═══════════════════════════════════════════════════════════════════
 
     fun uploadFiles(files: List<FileEntry>) {
-        scope.launch {
+        uploadJob?.cancel()
+        uploadJob = scope.launch {
             val toUpload = files.filter {
                 it.status == FileStatus.HASHED_NOT_FOUND && it.md5Hash != null
             }
@@ -278,9 +282,7 @@ class SideEffects(
             val startTime = System.currentTimeMillis()
 
             for (entry in toUpload) {
-                while (container.pauseController.isPaused) {
-                    delay(500)
-                }
+                container.pauseController.waitIfPaused()
 
                 val fileName = File(entry.path).name
                 dispatch(AppIntent.CurrentProcessingChanged(fileName, "Uploading..."))
@@ -300,7 +302,8 @@ class SideEffects(
                         dispatch(AppIntent.LogMessage("  Uploaded $fileName, analysis ID: $analysisId"))
 
                         // Poll for analysis results
-                        pollAnalysis(entry.path, analysisId, api)
+                        pollAnalysis(entry.path, analysisId, api, entry.md5Hash, entry.fileSizeBytes, entry.fileSizeFormatted)
+                        container.telemetry.recordUploadSuccess()
                     } else {
                         dispatch(AppIntent.FileProcessed(entry.path, entry.copy(
                             status = FileStatus.ERROR,
@@ -325,10 +328,10 @@ class SideEffects(
                 }
 
                 uploaded++
-                container.telemetry.recordUploadSuccess()
                 val elapsed = (System.currentTimeMillis() - startTime) / 1000f
                 dispatch(AppIntent.TotalProgress(uploaded.toFloat() / toUpload.size))
                 dispatch(AppIntent.UploadSpeed(
+                    percent = uploaded.toFloat() / toUpload.size,
                     speedMbps = if (elapsed > 0) uploaded.toFloat() / elapsed else 0f,
                     fileCount = uploaded,
                     elapsedFormatted = String.format("%.1fs", elapsed)
@@ -345,6 +348,9 @@ class SideEffects(
         filePath: String,
         analysisId: String,
         api: VirusTotalApi,
+        md5Hash: String?,
+        fileSizeBytes: Long,
+        fileSizeFormatted: String,
         maxRetries: Int = container.config.analysisMaxRetries
     ) {
         val fileName = File(filePath).name
@@ -372,9 +378,9 @@ class SideEffects(
                         val updatedEntry = FileEntry(
                             path = filePath,
                             fileName = fileName,
-                            fileSizeBytes = File(filePath).let { if (it.exists()) it.length() else 0L },
-                            fileSizeFormatted = File(filePath).let { if (it.exists()) formatFileSize(it.length()) else "?" },
-                            md5Hash = container.virusTotalApi?.calculateMd5(filePath),
+                            fileSizeBytes = fileSizeBytes,
+                            fileSizeFormatted = fileSizeFormatted,
+                            md5Hash = md5Hash,
                             sha256Hash = sha256,
                             status = FileStatus.HASHED_FOUND,
                             analysisUrl = sha256?.let { "https://www.virustotal.com/gui/file/$it" },
@@ -406,9 +412,9 @@ class SideEffects(
     fun validateCredentials(apiKey: String, user: String, persist: Boolean = true) {
         scope.launch {
             try {
-                val tempApi = VirusTotalApi(apiKey, config = container.config)
-                val valid = withContext(Dispatchers.IO) { tempApi.validateCredentials() }
-                tempApi.close()
+                val valid = VirusTotalApi(apiKey, config = container.config).use { tempApi ->
+                    withContext(Dispatchers.IO) { tempApi.validateCredentials() }
+                }
 
                 if (valid) {
                     container.updateCredentials(apiKey, user)
@@ -462,7 +468,7 @@ class SideEffects(
     // ═══════════════════════════════════════════════════════════════════
 
     fun openHashedFiles(files: List<FileEntry>) {
-        scope.launch(Dispatchers.IO) {
+        scope.launch {
             val withUrl = files.mapNotNull { it.analysisUrl }
             if (withUrl.isEmpty()) {
                 dispatch(AppIntent.LogMessage("No files with analysis URLs to open."))
@@ -477,7 +483,7 @@ class SideEffects(
             val desktop = Desktop.getDesktop()
             for (url in withUrl) {
                 try {
-                    desktop.browse(URI(url))
+                    withContext(Dispatchers.Main) { desktop.browse(URI(url)) }
                 } catch (e: Exception) {
                     logger.warn { "Failed to open URL $url: ${e.message}" }
                 }
@@ -569,7 +575,7 @@ class SideEffects(
                 dispatch(AppIntent.LogMessage(buildString {
                     appendLine("  Hash found on VirusTotal:")
                     appendLine("  SHA256: ${sha256 ?: "N/A"}")
-                    appendLine("  Detections: ${stats?.second ?: "N/A"}")
+                    appendLine("  Detections: ${stats?.ratio ?: "N/A"}")
                     appendLine("  Last analysis: ${lastDate?.let { formatTimestamp(it) } ?: "N/A"}")
                     appendLine("  URL: https://www.virustotal.com/gui/file/$sha256")
                 }.trimEnd()))
@@ -612,7 +618,7 @@ class SideEffects(
                         status = FileStatus.HASHED_FOUND,
                         sha256Hash = sha256,
                         analysisUrl = sha256?.let { "https://www.virustotal.com/gui/file/$it" },
-                        detectionRatio = stats?.second,
+                        detectionRatio = stats?.ratio,
                         lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
                     ))
                 } else {
@@ -674,10 +680,10 @@ class SideEffects(
             }
         }
 
-        container.pendingRecheckTracker.onPollCallback = { pending ->
+        container.pendingRecheckTracker.setOnPollCallback { pending ->
             pollRechecks(pending)
         }
-        container.pendingRecheckTracker.onTimerUpdate = { remaining, count ->
+        container.pendingRecheckTracker.setOnTimerUpdate { remaining, count ->
             dispatch(AppIntent.RecheckTimerTick(remaining, count))
         }
         container.pendingRecheckTracker.startTimer()
@@ -701,17 +707,18 @@ class SideEffects(
                     if (lastDate != recheck.originalAnalysisDate) {
                         val stats = VTResponseParser.extractDetectionStats(result)
                         val sha256 = VTResponseParser.extractSha256(result)
+                        val recheckFile = File(recheck.filePath)
 
                         val updatedEntry = FileEntry(
                             path = recheck.filePath,
-                            fileName = File(recheck.filePath).name,
-                            fileSizeBytes = File(recheck.filePath).let { if (it.exists()) it.length() else 0L },
-                            fileSizeFormatted = File(recheck.filePath).let { if (it.exists()) formatFileSize(it.length()) else "?" },
+                            fileName = recheckFile.name,
+                            fileSizeBytes = if (recheckFile.exists()) recheckFile.length() else 0L,
+                            fileSizeFormatted = if (recheckFile.exists()) formatFileSize(recheckFile.length()) else "?",
                             md5Hash = recheck.md5Hash,
                             sha256Hash = sha256,
                             status = FileStatus.HASHED_FOUND,
                             analysisUrl = sha256?.let { "https://www.virustotal.com/gui/file/$it" },
-                            detectionRatio = stats?.second,
+                            detectionRatio = stats?.ratio,
                             lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
                         )
 
@@ -801,7 +808,7 @@ class SideEffects(
     }
 
     private fun openRedFiles(files: List<FileEntry>) {
-        scope.launch(Dispatchers.IO) {
+        scope.launch {
             val redFiles = files.filter { entry ->
                 val ratio = entry.detectionRatio ?: return@filter false
                 val parts = ratio.split("/")
@@ -822,7 +829,7 @@ class SideEffects(
             val desktop = Desktop.getDesktop()
             for (entry in redFiles) {
                 entry.analysisUrl?.let { url ->
-                    try { desktop.browse(URI(url)) }
+                    try { withContext(Dispatchers.Main) { desktop.browse(URI(url)) } }
                     catch (e: Exception) { logger.warn { "Failed to open $url" } }
                 }
             }

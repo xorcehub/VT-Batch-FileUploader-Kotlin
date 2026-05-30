@@ -1,5 +1,6 @@
 package com.vtbatch.model
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -31,14 +32,14 @@ class QuotaManager(
         val size: Long? = null,
         val path: String? = null,
         val url: String? = null,
-        val last_scan: String? = null,
+        @SerialName("last_scan") val lastScan: String? = null,
         val status: String? = null,
-        val last_analysis_stats: String? = null,
-        val last_analysis_date: Long? = null,
+        @SerialName("last_analysis_stats") val lastAnalysisStats: String? = null,
+        @SerialName("last_analysis_date") val lastAnalysisDate: Long? = null,
         val detections: String? = null,
-        val detection_count: Int? = null,
-        val suggested_threat_label: String? = null,
-        val sandbox_verdicts: String? = null,
+        @SerialName("detection_count") val detectionCount: Int? = null,
+        @SerialName("suggested_threat_label") val suggestedThreatLabel: String? = null,
+        @SerialName("sandbox_verdicts") val sandboxVerdicts: String? = null,
     )
 
     /** Save file statuses to cache */
@@ -53,10 +54,10 @@ class QuotaManager(
                     size = File(filePath).length(),
                     path = filePath,
                     url = statusData["analysis_url"] as? String,
-                    last_scan = LocalDateTime.now().toString(),
+                    lastScan = LocalDateTime.now().toString(),
                     status = statusData["status"] as? String,
-                    last_analysis_stats = statusData["last_analysis_stats"]?.toString(),
-                    last_analysis_date = statusData["last_analysis_date"] as? Long,
+                    lastAnalysisStats = statusData["last_analysis_stats"]?.toString(),
+                    lastAnalysisDate = statusData["last_analysis_date"] as? Long,
                 )
             }
 
@@ -105,7 +106,7 @@ class QuotaManager(
         val result = mutableMapOf<String, CacheEntry>()
 
         for ((hashId, entry) in raw) {
-            val lastScan = entry.last_scan?.let {
+            val lastScan = entry.lastScan?.let {
                 try { LocalDateTime.parse(it) }
                 catch (e: DateTimeParseException) { null }
             }

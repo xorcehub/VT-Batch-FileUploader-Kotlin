@@ -22,9 +22,6 @@ java {
 //   (like Python's json.dumps / json.loads but type-safe at compile time)
 
 dependencies {
-    // Kotlin standard library
-    implementation(libs.kotlin.stdlib)
-
     // Coroutines — Kotlin's version of async/await. Like Python asyncio but
     // built into the language with structured concurrency.
     api(libs.kotlinx.coroutines.core)

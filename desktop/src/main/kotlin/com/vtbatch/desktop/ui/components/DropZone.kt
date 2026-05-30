@@ -45,10 +45,8 @@ fun DropZone(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = if (isDragOver) "⬇ Drop files here..." else "Drag & Drop Files Here",
-                style = if (isDragOver) MaterialTheme.typography.bodyLarge.copy(
-                    color = MaterialTheme.colorScheme.primary
-                ) else MaterialTheme.typography.bodyLarge,
+                text = if (isDragOver) "Drop files here..." else "Drag & Drop Files Here",
+                style = MaterialTheme.typography.bodyLarge,
                 color = if (isDragOver) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center

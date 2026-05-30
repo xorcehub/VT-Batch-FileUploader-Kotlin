@@ -5,6 +5,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import io.github.oshai.kotlinlogging.KotlinLogging
+import java.io.Closeable
+import java.util.concurrent.ConcurrentHashMap
 
 private val logger = KotlinLogging.logger {}
 
@@ -22,8 +24,9 @@ data class PendingRecheck(
 class PendingRecheckTracker(
     private val pollDelaySeconds: Double = 300.0,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-) {
-    private val pending = mutableMapOf<String, PendingRecheck>() // md5 -> recheck
+) : Closeable {
+
+    private val pending = ConcurrentHashMap<String, PendingRecheck>() // md5 -> recheck
     private var timerJob: Job? = null
     private var timerStartTimeMs = 0L
 
@@ -33,8 +36,11 @@ class PendingRecheckTracker(
     private val _pendingCount = MutableStateFlow(0)
     val pendingCount: StateFlow<Int> = _pendingCount.asStateFlow()
 
-    var onPollCallback: suspend (List<PendingRecheck>) -> Unit = {}
-    var onTimerUpdate: (remainingSeconds: Int, count: Int) -> Unit = { _, _ -> }
+    private var _onPollCallback: suspend (List<PendingRecheck>) -> Unit = {}
+    private var _onTimerUpdate: (remainingSeconds: Int, count: Int) -> Unit = { _, _ -> }
+
+    fun setOnPollCallback(callback: suspend (List<PendingRecheck>) -> Unit) { _onPollCallback = callback }
+    fun setOnTimerUpdate(callback: (remainingSeconds: Int, count: Int) -> Unit) { _onTimerUpdate = callback }
 
     fun addPending(filePath: String, md5Hash: String, originalAnalysisDate: Long?) {
         pending[md5Hash] = PendingRecheck(filePath, md5Hash, originalAnalysisDate)
@@ -66,7 +72,7 @@ class PendingRecheckTracker(
                 val elapsed = (System.currentTimeMillis() - timerStartTimeMs) / 1000.0
                 val remaining = maxOf(0, (pollDelaySeconds - elapsed).toInt())
                 _remainingSeconds.value = remaining
-                onTimerUpdate(remaining, pending.size)
+                _onTimerUpdate(remaining, pending.size)
 
                 if (remaining <= 0) {
                     triggerPoll()
@@ -92,10 +98,15 @@ class PendingRecheckTracker(
     private suspend fun triggerPoll() {
         val pendingFiles = pending.values.toList()
         if (pendingFiles.isNotEmpty()) {
-            try { onPollCallback(pendingFiles) }
+            try { _onPollCallback(pendingFiles) }
             catch (e: Exception) { logger.error { "Poll callback error: $e" } }
         }
     }
 
     fun isTimerActive(): Boolean = timerJob?.isActive == true
+
+    override fun close() {
+        stopTimer()
+        scope.cancel()
+    }
 }

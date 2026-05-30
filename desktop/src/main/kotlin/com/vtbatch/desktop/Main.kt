@@ -39,7 +39,7 @@ fun main() = application {
 
     // ── Telemetry ───────────────────────────────────────────────────
     val telemetry = LocalTelemetry()
-    telemetry.recordSession()
+    kotlinx.coroutines.runBlocking { telemetry.recordSession() }
 
     // ── Credentials ──────────────────────────────────────────────────
     val envApiKey = System.getenv("VT_API_KEY")
