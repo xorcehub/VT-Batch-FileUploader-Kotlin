@@ -92,7 +92,8 @@ object AppReducer {
             currentFile = null,
             currentStatus = null,
             statusLog = state.statusLog.append("List cleared."),
-            findMatches = FindNavigator.FindMatches()
+            findMatches = FindNavigator.FindMatches(),
+            expandedFilePath = null
         )
 
         is AppIntent.ShowCredentialDialog -> state.copy(
@@ -130,6 +131,11 @@ object AppReducer {
         is AppIntent.NavigateMatches -> {
             val updated = FindNavigator.navigate(state.findMatches, intent.direction)
             state.copy(findMatches = updated)
+        }
+
+        is AppIntent.ToggleFileExpansion -> {
+            val newPath = if (state.expandedFilePath == intent.path) null else intent.path
+            state.copy(expandedFilePath = newPath)
         }
 
         // ── Async results ──────────────────────────────────────────────

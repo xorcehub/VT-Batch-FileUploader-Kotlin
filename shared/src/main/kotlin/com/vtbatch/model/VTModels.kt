@@ -42,3 +42,11 @@ data class ProgressInfo(
     val fileCount: Int = 0,
     val elapsedFormatted: String = ""    // e.g. "2.3s"
 )
+
+/** Format byte count as human-readable size string. */
+fun formatFileSize(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes B"
+    bytes < 1024 * 1024 -> String.format("%.1f KB", bytes / 1024.0)
+    bytes < 1024 * 1024 * 1024 -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
+    else -> String.format("%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0))
+}

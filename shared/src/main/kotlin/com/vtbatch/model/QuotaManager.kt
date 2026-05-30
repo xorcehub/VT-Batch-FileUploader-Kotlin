@@ -40,6 +40,15 @@ class QuotaManager(
         @SerialName("detection_count") val detectionCount: Int? = null,
         @SerialName("suggested_threat_label") val suggestedThreatLabel: String? = null,
         @SerialName("sandbox_verdicts") val sandboxVerdicts: String? = null,
+        @SerialName("type_description") val typeDescription: String? = null,
+        @SerialName("tags") val tags: String? = null,
+        @SerialName("meaningful_name") val meaningfulName: String? = null,
+        @SerialName("times_submitted") val timesSubmitted: Int? = null,
+        @SerialName("reputation") val reputation: Int? = null,
+        @SerialName("first_submission_date") val firstSubmissionDate: Long? = null,
+        @SerialName("last_submission_date") val lastSubmissionDate: Long? = null,
+        @SerialName("total_votes_harmless") val totalVotesHarmless: Int? = null,
+        @SerialName("total_votes_malicious") val totalVotesMalicious: Int? = null,
     )
 
     /** Save file statuses to cache */

@@ -15,6 +15,8 @@ import com.vtbatch.model.FileEntry
 @Composable
 fun FileList(
     files: List<FileEntry>,
+    expandedFilePath: String? = null,
+    onToggleExpansion: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -23,7 +25,11 @@ fun FileList(
         contentPadding = PaddingValues(vertical = 4.dp)
     ) {
         items(files, key = { it.path }) { file ->
-            FileListEntry(file = file)
+            FileListEntry(
+                file = file,
+                isExpanded = expandedFilePath == file.path,
+                onToggleExpansion = onToggleExpansion
+            )
         }
     }
 }

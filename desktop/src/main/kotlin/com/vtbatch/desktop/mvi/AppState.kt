@@ -60,5 +60,8 @@ data class AppState(
     val isDragOver: Boolean = false,
 
     /** API key available and valid */
-    val hasCredentials: Boolean = false
+    val hasCredentials: Boolean = false,
+
+    /** Currently expanded file row (click to toggle detail panel) */
+    val expandedFilePath: String? = null
 )

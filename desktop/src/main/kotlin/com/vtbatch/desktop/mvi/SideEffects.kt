@@ -14,6 +14,8 @@ import java.time.format.DateTimeParseException
 
 private val logger = KotlinLogging.logger {}
 
+private val VT_FILE_URL = "https://www.virustotal.com/gui/file/"
+
 /**
  * All async side effects for the MVI architecture.
  *
@@ -130,7 +132,19 @@ class SideEffects(
                             status = FileStatus.HASHED_FOUND,
                             analysisUrl = cached.url,
                             detectionRatio = cached.detections,
-                            lastAnalysisDate = cached.lastAnalysisDate?.let { formatTimestamp(it) }
+                            lastAnalysisDate = cached.lastAnalysisDate?.let { formatTimestamp(it) },
+                            lastAnalysisStats = cached.lastAnalysisStats,
+                            popularThreatLabel = cached.suggestedThreatLabel,
+                            typeDescription = cached.typeDescription,
+                            tags = cached.tags?.split(",")?.filter { it.isNotBlank() },
+                            meaningfulName = cached.meaningfulName,
+                            timesSubmitted = cached.timesSubmitted,
+                            reputation = cached.reputation,
+                            firstSubmissionDate = cached.firstSubmissionDate?.let { formatTimestamp(it) },
+                            lastSubmissionDate = cached.lastSubmissionDate?.let { formatTimestamp(it) },
+                            totalVotes = cached.totalVotesHarmless?.let { h ->
+                                cached.totalVotesMalicious?.let { m -> Pair(h, m) }
+                            }
                         ))
                     } else {
                         newCount++
@@ -169,10 +183,10 @@ class SideEffects(
                 container.telemetry.recordFilesScanned(files.size)
                 dispatch(AppIntent.FilesScanned(files, summary))
 
-                // Auto-refresh stale cache entries (completed but missing detections)
+                // Auto-refresh stale cache entries in background so scan returns immediately
                 val stale = files.filter { it.detectionRatio == null && it.md5Hash != null }
                 if (stale.isNotEmpty() && container.virusTotalApi != null) {
-                    refreshStaleEntries(stale)
+                    scope.launch { refreshStaleEntries(stale) }
                 }
 
             } catch (e: Exception) {
@@ -188,38 +202,30 @@ class SideEffects(
         dispatch(AppIntent.LogMessage("Refreshing ${stale.size} stale cache entry(ies)..."))
 
         for (entry in stale) {
+            val hash = entry.md5Hash ?: continue
             try {
                 val result = withContext(Dispatchers.IO) {
-                    api.checkFileOnVirusTotal(entry.md5Hash!!)
+                    api.checkFileOnVirusTotal(hash)
                 }
 
                 val updatedEntry = if (result != null) {
                     val stats = VTResponseParser.extractDetectionStats(result)
                     val sha256 = VTResponseParser.extractSha256(result)
                     val lastDate = VTResponseParser.extractLastAnalysisDate(result)
+                    val details = VTResponseParser.extractFileDetails(result)
 
                     // Update cache
                     withContext(Dispatchers.IO) {
-                        container.quotaManager.saveEntry(entry.md5Hash!!, QuotaManager.CacheEntry(
-                            filename = entry.fileName,
-                            size = entry.fileSizeBytes,
-                            path = entry.path,
-                            url = sha256?.let { "https://www.virustotal.com/gui/file/$it" } ?: entry.analysisUrl,
-                            lastScan = LocalDateTime.now().toString(),
-                            status = "found",
-                            lastAnalysisStats = stats?.description,
-                            lastAnalysisDate = lastDate,
-                            detections = stats?.ratio
-                        ))
+                        container.quotaManager.saveEntry(hash, buildCacheEntry(entry, sha256, lastDate, stats, details))
                     }
 
                     entry.copy(
                         status = FileStatus.HASHED_FOUND,
                         sha256Hash = sha256,
-                        analysisUrl = sha256?.let { "https://www.virustotal.com/gui/file/$it" } ?: entry.analysisUrl,
+                        analysisUrl = sha256?.let { "${VT_FILE_URL}$it" } ?: entry.analysisUrl,
                         detectionRatio = stats?.ratio,
                         lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
-                    )
+                    ).withDetails(details)
                 } else {
                     entry.copy(status = FileStatus.HASHED_NOT_FOUND)
                 }
@@ -277,29 +283,20 @@ class SideEffects(
                         val stats = VTResponseParser.extractDetectionStats(vtResult)
                         val lastDate = VTResponseParser.extractLastAnalysisDate(vtResult)
                         val sha256 = VTResponseParser.extractSha256(vtResult)
+                        val details = VTResponseParser.extractFileDetails(vtResult)
 
                         // Save to cache
                         withContext(Dispatchers.IO) {
-                            container.quotaManager.saveEntry(entry.md5Hash!!, QuotaManager.CacheEntry(
-                                filename = fileName,
-                                size = entry.fileSizeBytes,
-                                path = entry.path,
-                                url = "https://www.virustotal.com/gui/file/$sha256",
-                                lastScan = LocalDateTime.now().toString(),
-                                status = "found",
-                                lastAnalysisStats = stats?.description,
-                                lastAnalysisDate = lastDate,
-                                detections = stats?.ratio
-                            ))
+                            container.quotaManager.saveEntry(entry.md5Hash!!, buildCacheEntry(entry, sha256, lastDate, stats, details))
                         }
 
                         entry.copy(
                             status = FileStatus.HASHED_FOUND,
                             sha256Hash = sha256,
-                            analysisUrl = "https://www.virustotal.com/gui/file/$sha256",
+                            analysisUrl = "${VT_FILE_URL}$sha256",
                             detectionRatio = stats?.ratio,
                             lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
-                        )
+                        ).withDetails(details)
                     } else {
                         // Not found on VT
                         entry.copy(status = FileStatus.HASHED_NOT_FOUND)
@@ -522,7 +519,7 @@ class SideEffects(
                         val updatedEntry = entry.copy(
                             sha256Hash = sha256,
                             status = FileStatus.ANALYSIS_COMPLETE,
-                            analysisUrl = sha256?.let { "https://www.virustotal.com/gui/file/$it" },
+                            analysisUrl = sha256?.let { "${VT_FILE_URL}$it" },
                             detectionRatio = stats,
                             lastAnalysisDate = formatTimestamp(lastDate)
                         )
@@ -533,7 +530,7 @@ class SideEffects(
                             size = entry.fileSizeBytes,
                             path = entry.path,
                             url = updatedEntry.analysisUrl,
-                            lastScan = java.time.LocalDateTime.now().toString(),
+                            lastScan = java.time.Instant.now().toString(),
                             status = "completed",
                             lastAnalysisDate = lastDate,
                             detections = stats
@@ -764,28 +761,19 @@ class SideEffects(
                     val stats = VTResponseParser.extractDetectionStats(result)
                     val sha256 = VTResponseParser.extractSha256(result)
                     val lastDate = VTResponseParser.extractLastAnalysisDate(result)
+                    val details = VTResponseParser.extractFileDetails(result)
 
                     updated.add(entry.copy(
                         status = FileStatus.HASHED_FOUND,
                         sha256Hash = sha256,
-                        analysisUrl = sha256?.let { "https://www.virustotal.com/gui/file/$it" },
+                        analysisUrl = sha256?.let { "${VT_FILE_URL}$it" },
                         detectionRatio = stats?.ratio,
                         lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
-                    ))
+                    ).withDetails(details))
 
                     // Persist to cache so re-drops get the fresh data
                     withContext(Dispatchers.IO) {
-                        container.quotaManager.saveEntry(hash, QuotaManager.CacheEntry(
-                            filename = entry.fileName,
-                            size = entry.fileSizeBytes,
-                            path = entry.path,
-                            url = sha256?.let { "https://www.virustotal.com/gui/file/$it" },
-                            lastScan = LocalDateTime.now().toString(),
-                            status = "found",
-                            lastAnalysisStats = stats?.description,
-                            lastAnalysisDate = lastDate,
-                            detections = stats?.ratio
-                        ))
+                        container.quotaManager.saveEntry(hash, buildCacheEntry(entry, sha256, lastDate, stats, details))
                     }
                 } else {
                     updated.add(entry.copy(status = FileStatus.HASHED_NOT_FOUND))
@@ -873,6 +861,7 @@ class SideEffects(
                     if (lastDate != recheck.originalAnalysisDate) {
                         val stats = VTResponseParser.extractDetectionStats(result)
                         val sha256 = VTResponseParser.extractSha256(result)
+                        val details = VTResponseParser.extractFileDetails(result)
                         val recheckFile = File(recheck.filePath)
 
                         val updatedEntry = FileEntry(
@@ -883,10 +872,10 @@ class SideEffects(
                             md5Hash = recheck.md5Hash,
                             sha256Hash = sha256,
                             status = FileStatus.HASHED_FOUND,
-                            analysisUrl = sha256?.let { "https://www.virustotal.com/gui/file/$it" },
+                            analysisUrl = sha256?.let { "${VT_FILE_URL}$it" },
                             detectionRatio = stats?.ratio,
                             lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
-                        )
+                        ).withDetails(details)
 
                         dispatch(AppIntent.FileProcessed(recheck.filePath, updatedEntry))
                         container.pendingRecheckTracker.clearPending(recheck.md5Hash)
@@ -1020,12 +1009,55 @@ class SideEffects(
     //  HELPERS — Formatting
     // ═══════════════════════════════════════════════════════════════════
 
-    private fun formatFileSize(bytes: Long): String = when {
-        bytes < 1024 -> "$bytes B"
-        bytes < 1024 * 1024 -> String.format("%.1f KB", bytes / 1024.0)
-        bytes < 1024 * 1024 * 1024 -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
-        else -> String.format("%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0))
+    /** Merge FileDetails into a FileEntry (only overwrites null fields). */
+    private fun FileEntry.withDetails(details: VTResponseParser.FileDetails?): FileEntry {
+        if (details == null) return this
+        return copy(
+            lastAnalysisStats = details.lastAnalysisStats,
+            popularThreatLabel = details.popularThreatLabel,
+            typeDescription = details.typeDescription,
+            tags = details.tags,
+            meaningfulName = details.meaningfulName,
+            timesSubmitted = details.timesSubmitted,
+            reputation = details.reputation,
+            firstSubmissionDate = details.firstSubmissionDate?.let { formatTimestamp(it) },
+            lastSubmissionDate = details.lastSubmissionDate?.let { formatTimestamp(it) },
+            totalVotes = details.totalVotesHarmless?.let { h ->
+                details.totalVotesMalicious?.let { m -> Pair(h, m) }
+            }
+        )
     }
+
+    /** Build a CacheEntry from a FileEntry + FileDetails, merging in all persisted fields. */
+    private fun buildCacheEntry(
+        entry: FileEntry,
+        sha256: String?,
+        lastDate: Long?,
+        stats: VTResponseParser.DetectionStats?,
+        details: VTResponseParser.FileDetails?
+    ): QuotaManager.CacheEntry = QuotaManager.CacheEntry(
+        filename = entry.fileName,
+        size = entry.fileSizeBytes,
+        path = entry.path,
+        url = sha256?.let { "${VT_FILE_URL}$it" } ?: entry.analysisUrl,
+        lastScan = Instant.now().toString(),
+        status = "found",
+        lastAnalysisStats = stats?.description ?: details?.lastAnalysisStats,
+        lastAnalysisDate = lastDate,
+        detections = stats?.ratio,
+        detectionCount = details?.detectionCount,
+        suggestedThreatLabel = details?.suggestedThreatLabel,
+        typeDescription = details?.typeDescription,
+        tags = details?.tags?.joinToString(","),
+        meaningfulName = details?.meaningfulName,
+        timesSubmitted = details?.timesSubmitted,
+        reputation = details?.reputation,
+        firstSubmissionDate = details?.firstSubmissionDate,
+        lastSubmissionDate = details?.lastSubmissionDate,
+        totalVotesHarmless = details?.totalVotesHarmless,
+        totalVotesMalicious = details?.totalVotesMalicious
+    )
+
 
     private fun formatTimestamp(epochSeconds: Long): String {
         return try {

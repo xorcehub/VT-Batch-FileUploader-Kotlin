@@ -1,8 +1,10 @@
 package com.vtbatch.model
 
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.int
 import io.github.oshai.kotlinlogging.KotlinLogging
 
 private val logger = KotlinLogging.logger {}
@@ -123,5 +125,95 @@ object VTResponseParser {
             json["data"]?.jsonObject?.get("attributes")?.jsonObject
                 ?.get("last_analysis_date")?.jsonPrimitive?.content?.toLongOrNull()
         } catch (e: Exception) { null }
+    }
+
+    /** Structured file details extracted from a VT file report response. */
+    data class FileDetails(
+        val lastAnalysisStats: String?,      // formatted "42 malicious, 28 harmless, ..."
+        val popularThreatLabel: String?,
+        val typeDescription: String?,
+        val tags: List<String>?,
+        val meaningfulName: String?,
+        val timesSubmitted: Int?,
+        val reputation: Int?,
+        val firstSubmissionDate: Long?,      // epoch seconds
+        val lastSubmissionDate: Long?,       // epoch seconds
+        val totalVotesHarmless: Int?,
+        val totalVotesMalicious: Int?,
+        val detectionCount: Int?,            // malicious count for cache
+        val suggestedThreatLabel: String?    // for cache
+    )
+
+    /**
+     * Extract all file detail fields from a VT /files/{hash} response in a single pass.
+     * Returns null if the response doesn't have the expected structure.
+     */
+    fun extractFileDetails(json: JsonObject): FileDetails? {
+        return try {
+            val attrs = json["data"]?.jsonObject?.get("attributes")?.jsonObject ?: return null
+
+            // Last analysis stats breakdown
+            val lastAnalysisStats = try {
+                val stats = attrs["last_analysis_stats"]?.jsonObject
+                if (stats != null) {
+                    val malicious = stats["malicious"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                    val suspicious = stats["suspicious"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                    val undetected = stats["undetected"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                    val harmless = stats["harmless"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                    val timeout = stats["timeout"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                    buildString {
+                        if (malicious > 0) append("$malicious malicious, ")
+                        if (suspicious > 0) append("$suspicious suspicious, ")
+                        if (harmless > 0) append("$harmless harmless, ")
+                        if (undetected > 0) append("$undetected undetected")
+                        if (timeout > 0) append(", $timeout timeout")
+                    }.trimEnd(',', ' ')
+                } else null
+            } catch (_: Exception) { null }
+
+            // Threat label
+            val threatLabel = try {
+                attrs["popular_threat_classification"]?.jsonObject
+                    ?.get("suggested_threat_label")?.jsonPrimitive?.content
+                    ?: attrs["popular_threat_label"]?.jsonPrimitive?.content
+            } catch (_: Exception) { null }
+
+            // Tags
+            val tags = try {
+                attrs["tags"]?.jsonArray?.map { it.jsonPrimitive.content }
+            } catch (_: Exception) { null }
+
+            // Total votes
+            val votesHarmless = try {
+                attrs["total_votes"]?.jsonObject?.get("harmless")?.jsonPrimitive?.content?.toIntOrNull()
+            } catch (_: Exception) { null }
+            val votesMalicious = try {
+                attrs["total_votes"]?.jsonObject?.get("malicious")?.jsonPrimitive?.content?.toIntOrNull()
+            } catch (_: Exception) { null }
+
+            // Detection count (malicious engines count)
+            val detectionCount = try {
+                attrs["last_analysis_stats"]?.jsonObject?.get("malicious")?.jsonPrimitive?.content?.toIntOrNull()
+            } catch (_: Exception) { null }
+
+            FileDetails(
+                lastAnalysisStats = lastAnalysisStats,
+                popularThreatLabel = threatLabel,
+                typeDescription = try { attrs["type_description"]?.jsonPrimitive?.content } catch (_: Exception) { null },
+                tags = tags,
+                meaningfulName = try { attrs["meaningful_name"]?.jsonPrimitive?.content } catch (_: Exception) { null },
+                timesSubmitted = try { attrs["times_submitted"]?.jsonPrimitive?.content?.toIntOrNull() } catch (_: Exception) { null },
+                reputation = try { attrs["reputation"]?.jsonPrimitive?.content?.toIntOrNull() } catch (_: Exception) { null },
+                firstSubmissionDate = try { attrs["first_submission_date"]?.jsonPrimitive?.content?.toLongOrNull() } catch (_: Exception) { null },
+                lastSubmissionDate = try { attrs["last_submission_date"]?.jsonPrimitive?.content?.toLongOrNull() } catch (_: Exception) { null },
+                totalVotesHarmless = votesHarmless,
+                totalVotesMalicious = votesMalicious,
+                detectionCount = detectionCount,
+                suggestedThreatLabel = threatLabel
+            )
+        } catch (e: Exception) {
+            logger.warn { "Failed to extract file details: ${e.message}" }
+            null
+        }
     }
 }

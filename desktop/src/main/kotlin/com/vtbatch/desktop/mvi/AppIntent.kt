@@ -53,6 +53,9 @@ sealed class AppIntent {
     /** Navigate to next/previous find match (+1 = next, -1 = previous) */
     data class NavigateMatches(val direction: Int) : AppIntent()
 
+    /** Toggle the expanded detail panel for a file row */
+    data class ToggleFileExpansion(val path: String) : AppIntent()
+
     // ── Async results (from side effects) ──────────────────────────────
 
     /** File scanning completed — here are the entries (with MD5 hashes and cache status) */

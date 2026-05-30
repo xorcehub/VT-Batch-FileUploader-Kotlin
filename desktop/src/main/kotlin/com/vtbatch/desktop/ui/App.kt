@@ -56,6 +56,8 @@ fun App(store: AppStore = remember { AppStore() }) {
                 Box(modifier = Modifier.weight(1f, fill = true)) {
                     FileList(
                         files = state.files,
+                        expandedFilePath = state.expandedFilePath,
+                        onToggleExpansion = { path -> store.dispatch(AppIntent.ToggleFileExpansion(path)) },
                         modifier = Modifier.fillMaxSize()
                     )
                 }

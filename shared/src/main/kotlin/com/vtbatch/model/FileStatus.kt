@@ -29,7 +29,19 @@ data class FileEntry(
     val analysisUrl: String? = null,     // VT URL to view results
     val detectionRatio: String? = null,  // e.g. "0/72"
     val lastAnalysisDate: String? = null,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+
+    // Detail fields (populated from VT /files/{hash} response)
+    val lastAnalysisStats: String? = null,       // "42 malicious, 28 harmless, ..."
+    val popularThreatLabel: String? = null,       // "trojan", "miner"
+    val typeDescription: String? = null,          // "Win64 EXE"
+    val tags: List<String>? = null,               // ["executable", "windows"]
+    val meaningfulName: String? = null,           // alternative name from VT
+    val timesSubmitted: Int? = null,              // submission count
+    val reputation: Int? = null,                  // community score
+    val firstSubmissionDate: String? = null,      // formatted date
+    val lastSubmissionDate: String? = null,       // formatted date
+    val totalVotes: Pair<Int, Int>? = null        // (harmless, malicious)
 ) {
     // Determined color for the file list entry based on detection results
     val colorTag: ColorTag
