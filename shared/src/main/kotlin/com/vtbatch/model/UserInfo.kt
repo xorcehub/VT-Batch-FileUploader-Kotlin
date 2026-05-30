@@ -10,8 +10,9 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.Json
 
 private val logger = KotlinLogging.logger {}
 
@@ -22,6 +23,8 @@ data class VTUserInfoResponse(
 
 @Serializable
 data class VTUserData(
+    val id: String? = null,
+    val type: String? = null,
     val attributes: VTUserAttributes? = null
 )
 
@@ -32,8 +35,8 @@ data class VTUserAttributes(
 
 @Serializable
 data class VTQuotas(
-    val api_requests_daily: VTQuotaInfo? = null,
-    val api_requests_monthly: VTQuotaInfo? = null
+    @SerialName("api_requests_daily") val apiRequestsDaily: VTQuotaInfo? = null,
+    @SerialName("api_requests_monthly") val apiRequestsMonthly: VTQuotaInfo? = null
 )
 
 @Serializable
@@ -50,7 +53,9 @@ suspend fun getUserInfo(apiKey: String, user: String, config: AppConfig = AppCon
     return try {
         val client = HttpClient(engine) {
             install(HttpTimeout) { requestTimeoutMillis = config.shortTimeout * 1000L }
-            install(ContentNegotiation) { json() }
+            install(ContentNegotiation) {
+                json(Json { ignoreUnknownKeys = true })
+            }
         }
         client.use {
             val response = it.get("${config.apiBaseUrl}/users/$user") {

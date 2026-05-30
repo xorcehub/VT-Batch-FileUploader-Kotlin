@@ -594,8 +594,8 @@ class QuotaCommand : Callable<Int> {
 
             val quotas = info?.data?.attributes?.quotas
             if (quotas != null) {
-                val daily = quotas.api_requests_daily
-                val monthly = quotas.api_requests_monthly
+                val daily = quotas.apiRequestsDaily
+                val monthly = quotas.apiRequestsMonthly
 
                 val data = mutableMapOf<String, Any?>(
                     "user_id" to (info.data?.attributes?.let { attrs ->

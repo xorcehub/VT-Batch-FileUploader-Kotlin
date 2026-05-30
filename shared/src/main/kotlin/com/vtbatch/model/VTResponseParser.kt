@@ -47,7 +47,44 @@ object VTResponseParser {
 
     /** Extract detection ratio string from an analysis response */
     fun extractDetectionStatsFromAnalysis(json: JsonObject): String? {
-        return extractDetectionStats(json)?.ratio
+        // First try the file report format (last_analysis_results)
+        val fromReport = extractDetectionStats(json)?.ratio
+        if (fromReport != null) return fromReport
+
+        // Fall back to analysis response format which uses "results" or "stats"
+        return try {
+            val attrs = json["data"]?.jsonObject?.get("attributes")?.jsonObject
+
+            // Try stats object first (has explicit counts)
+            val stats = attrs?.get("stats")?.jsonObject
+            if (stats != null) {
+                val malicious = stats["malicious"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                val suspicious = stats["suspicious"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                val undetected = stats["undetected"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                val harmless = stats["harmless"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                val total = malicious + suspicious + undetected + harmless +
+                    (stats["timeout"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0) +
+                    (stats["confirmed-timeout"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0) +
+                    (stats["failure"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0) +
+                    (stats["type-unsupported"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0)
+                return "$malicious/$total"
+            }
+
+            // Fall back to counting individual results
+            val results = attrs?.get("results")?.jsonObject
+            if (results != null) {
+                val total = results.size
+                val malicious = results.values.count {
+                    it.jsonObject["category"]?.jsonPrimitive?.content == "malicious"
+                }
+                return "$malicious/$total"
+            }
+
+            null
+        } catch (e: Exception) {
+            logger.warn { "Failed to extract analysis stats: ${e.message}" }
+            null
+        }
     }
 
     /** Extract SHA256 hash from a file report response */

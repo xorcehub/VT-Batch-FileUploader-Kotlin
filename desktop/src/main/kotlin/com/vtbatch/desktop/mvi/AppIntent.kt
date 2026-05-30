@@ -97,7 +97,12 @@ sealed class AppIntent {
     ) : AppIntent()
 
     /** Total progress across all operations */
-    data class TotalProgress(val percent: Float) : AppIntent()
+    data class TotalProgress(
+        val percent: Float,
+        val speedFormatted: String = "",
+        val fileCount: Int = 0,
+        val elapsedFormatted: String = ""
+    ) : AppIntent()
 
     /** Quota info fetched from VT */
     data class QuotaUpdated(val daily: QuotaData, val monthly: QuotaData) : AppIntent()

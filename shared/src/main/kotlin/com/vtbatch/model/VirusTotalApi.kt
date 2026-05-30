@@ -116,25 +116,38 @@ class VirusTotalApi(
         }
     }
 
-    /** Upload a file to VirusTotal */
-    suspend fun uploadFileToVirusTotal(filePath: String): JsonObject {
+    /**
+     * Upload a file to VirusTotal with optional byte-level progress tracking.
+     * Uses Ktor's onUpload callback to report real-time progress as bytes are
+     * sent over the wire (matches Python's MultipartEncoderMonitor approach).
+     */
+    suspend fun uploadFileToVirusTotal(filePath: String, onProgress: ((bytesSent: Long, totalBytes: Long) -> Unit)? = null): JsonObject {
         rateLimiter?.acquire()
         val file = File(filePath)
 
         if (!file.exists()) throw FileUploadError("File not found: $filePath", mapOf("file_path" to filePath))
 
         return try {
-            val response = client.submitFormWithBinaryData(
-                url = "$baseUrl/files",
-                formData = formData {
-                    append("file", file.readBytes(), Headers.build {
-                        append(HttpHeaders.ContentDisposition, "filename=\"${file.name}\"")
-                        append(HttpHeaders.ContentType, "application/octet-stream")
-                    })
-                }
-            ) {
+            val fileBytes = file.readBytes()
+            val totalSize = fileBytes.size.toLong()
+            val response = client.post("$baseUrl/files") {
                 header("x-apikey", getApiKey())
                 timeout { requestTimeoutMillis = config.longTimeout * 1000L }
+
+                setBody(
+                    MultiPartFormDataContent(
+                        formData {
+                            append("file", fileBytes, Headers.build {
+                                append(HttpHeaders.ContentDisposition, "filename=\"${file.name}\"")
+                                append(HttpHeaders.ContentType, "application/octet-stream")
+                            })
+                        }
+                    )
+                )
+
+                onUpload { bytesSentTotal, _ ->
+                    onProgress?.invoke(bytesSentTotal, totalSize)
+                }
             }
 
             when (response.status.value) {

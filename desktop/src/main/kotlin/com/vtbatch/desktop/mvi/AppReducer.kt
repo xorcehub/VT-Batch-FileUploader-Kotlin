@@ -208,7 +208,12 @@ object AppReducer {
         )
 
         is AppIntent.TotalProgress -> state.copy(
-            totalProgress = state.totalProgress.copy(percent = intent.percent.toDouble())
+            totalProgress = ProgressInfo(
+                percent = intent.percent.toDouble(),
+                speedFormatted = intent.speedFormatted,
+                fileCount = intent.fileCount,
+                elapsedFormatted = intent.elapsedFormatted
+            )
         )
 
         is AppIntent.QuotaUpdated -> state.copy(

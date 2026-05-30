@@ -68,6 +68,10 @@ class AppStore(
                 sideEffects.openHashedFiles(state.files)
             }
 
+            is AppIntent.ClearList -> {
+                sideEffects.cancelAll()
+            }
+
             is AppIntent.SubmitCredentials -> {
                 sideEffects.validateCredentials(intent.apiKey, intent.user, intent.persist)
             }
@@ -82,7 +86,7 @@ class AppStore(
 
             else -> {
                 // No side effect needed — pure state change
-                // (ClearList, FindFiles, NavigateMatches, error/result intents, etc.)
+                // (FindFiles, NavigateMatches, error/result intents, etc.)
             }
         }
     }

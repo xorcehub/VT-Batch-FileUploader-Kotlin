@@ -36,10 +36,34 @@ class SideEffects(
     private var scanJob: Job? = null
     private var processJob: Job? = null
     private var uploadJob: Job? = null
+    private var quotaRefreshJob: Job? = null
+
+    init {
+        // Try fetching quota on startup (works if env vars are set).
+        // If credentials come from persisted storage, they'll trigger
+        // fetchQuota again via SubmitCredentials -> validateCredentials.
+        fetchQuota()
+        // Refresh quota every 60 seconds (matching Python source)
+        quotaRefreshJob = scope.launch {
+            while (true) {
+                delay(60 * 1000L)
+                fetchQuota()
+            }
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════════════
     //  FILE SCANNING (DropFiles)
     // ═══════════════════════════════════════════════════════════════════
+
+    /** Cancel all running operations (matching Python's handle_clear_list) */
+    fun cancelAll() {
+        scanJob?.cancel()
+        processJob?.cancel()
+        uploadJob?.cancel()
+        container.pendingRecheckTracker.stopTimer()
+        container.pendingRecheckTracker.clearAll()
+    }
 
     fun scanFiles(paths: List<String>) {
         scanJob?.cancel()
@@ -65,6 +89,7 @@ class SideEffects(
                 val files = mutableListOf<FileEntry>()
                 var newCount = 0
                 var cachedCount = 0
+                var totalBytesHashed = 0L
                 val startTime = System.currentTimeMillis()
 
                 for ((index, filePath) in allSuspicious.withIndex()) {
@@ -121,12 +146,13 @@ class SideEffects(
                     }
 
                     // Progress
+                    totalBytesHashed += sizeBytes
                     val pct = (index + 1).toFloat() / allSuspicious.size
                     val elapsed = (System.currentTimeMillis() - startTime).toFloat() / 1000f
-                    val speed = if (elapsed > 0) (index + 1).toFloat() / elapsed else 0f
+                    val speedMbps = if (elapsed > 0) (totalBytesHashed / (1024.0 * 1024.0)) / elapsed else 0.0
                     dispatch(AppIntent.HashingProgress(
                         percent = pct,
-                        speedMbps = speed,
+                        speedMbps = speedMbps.toFloat(),
                         fileCount = index + 1,
                         elapsedFormatted = String.format("%.1fs", elapsed)
                     ))
@@ -143,11 +169,68 @@ class SideEffects(
                 container.telemetry.recordFilesScanned(files.size)
                 dispatch(AppIntent.FilesScanned(files, summary))
 
+                // Auto-refresh stale cache entries (completed but missing detections)
+                val stale = files.filter { it.detectionRatio == null && it.md5Hash != null }
+                if (stale.isNotEmpty() && container.virusTotalApi != null) {
+                    refreshStaleEntries(stale)
+                }
+
             } catch (e: Exception) {
                 val msg = container.errorHandler.handle(e)
                 dispatch(AppIntent.Error(msg))
             }
         }
+    }
+
+    /** Refresh stale cache entries one by one using FileProcessed (preserves the full file list). */
+    private suspend fun refreshStaleEntries(stale: List<FileEntry>) {
+        val api = container.virusTotalApi ?: return
+        dispatch(AppIntent.LogMessage("Refreshing ${stale.size} stale cache entry(ies)..."))
+
+        for (entry in stale) {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    api.checkFileOnVirusTotal(entry.md5Hash!!)
+                }
+
+                val updatedEntry = if (result != null) {
+                    val stats = VTResponseParser.extractDetectionStats(result)
+                    val sha256 = VTResponseParser.extractSha256(result)
+                    val lastDate = VTResponseParser.extractLastAnalysisDate(result)
+
+                    // Update cache
+                    withContext(Dispatchers.IO) {
+                        container.quotaManager.saveEntry(entry.md5Hash!!, QuotaManager.CacheEntry(
+                            filename = entry.fileName,
+                            size = entry.fileSizeBytes,
+                            path = entry.path,
+                            url = sha256?.let { "https://www.virustotal.com/gui/file/$it" } ?: entry.analysisUrl,
+                            lastScan = LocalDateTime.now().toString(),
+                            status = "found",
+                            lastAnalysisStats = stats?.description,
+                            lastAnalysisDate = lastDate,
+                            detections = stats?.ratio
+                        ))
+                    }
+
+                    entry.copy(
+                        status = FileStatus.HASHED_FOUND,
+                        sha256Hash = sha256,
+                        analysisUrl = sha256?.let { "https://www.virustotal.com/gui/file/$it" } ?: entry.analysisUrl,
+                        detectionRatio = stats?.ratio,
+                        lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
+                    )
+                } else {
+                    entry.copy(status = FileStatus.HASHED_NOT_FOUND)
+                }
+
+                dispatch(AppIntent.FileProcessed(entry.path, updatedEntry))
+            } catch (e: Exception) {
+                logger.warn { "Auto-refresh failed for ${entry.fileName}: ${e.message}" }
+            }
+        }
+
+        dispatch(AppIntent.LogMessage("Stale cache refresh complete."))
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -174,6 +257,7 @@ class SideEffects(
             }
 
             var processed = 0
+            var totalBytesProcessed = 0L
             val startTime = System.currentTimeMillis()
 
             for (entry in toProcess) {
@@ -239,12 +323,19 @@ class SideEffects(
                 }
 
                 processed++
+                totalBytesProcessed += entry.fileSizeBytes
                 val pct = processed.toFloat() / toProcess.size
                 val elapsed = (System.currentTimeMillis() - startTime) / 1000f
-                dispatch(AppIntent.TotalProgress(pct))
+                val speedMbps = if (elapsed > 0) (totalBytesProcessed / (1024.0 * 1024.0)) / elapsed else 0.0
+                dispatch(AppIntent.TotalProgress(
+                    percent = pct,
+                    speedFormatted = "%.1f MB/s".format(speedMbps),
+                    fileCount = processed,
+                    elapsedFormatted = String.format("%.1fs", elapsed)
+                ))
                 dispatch(AppIntent.HashingProgress(
                     percent = pct,
-                    speedMbps = if (elapsed > 0) processed.toFloat() / elapsed else 0f,
+                    speedMbps = speedMbps.toFloat(),
                     fileCount = processed,
                     elapsedFormatted = String.format("%.1fs", elapsed)
                 ))
@@ -279,7 +370,15 @@ class SideEffects(
             }
 
             var uploaded = 0
-            val startTime = System.currentTimeMillis()
+            var totalBytesUploaded = 0L
+            val uploadStartTime = System.currentTimeMillis()
+            // Collect successfully uploaded files for phase 2 (polling)
+            val pendingAnalysis = mutableListOf<Pair<FileEntry, String>>()
+
+            // ═══════════════════════════════════════════════════════════
+            //  PHASE 1: Upload all files back-to-back
+            // ═══════════════════════════════════════════════════════════
+            dispatch(AppIntent.LogMessage("Phase 1: Uploading ${toUpload.size} file(s)..."))
 
             for (entry in toUpload) {
                 container.pauseController.waitIfPaused()
@@ -290,19 +389,41 @@ class SideEffects(
                 try {
                     dispatch(AppIntent.UploadProgress(entry.path, 0f))
 
+                    val fileStartTime = System.currentTimeMillis()
+                    var lastProgressBytes = 0L
+                    var lastProgressTime = fileStartTime
+
                     val result = withContext(Dispatchers.IO) {
-                        api.uploadFileToVirusTotal(entry.path)
+                        api.uploadFileToVirusTotal(entry.path) { bytesSent, totalBytes ->
+                            val percent = if (totalBytes > 0) (bytesSent.toFloat() / totalBytes).coerceIn(0f, 1f) else 0f
+                            dispatch(AppIntent.UploadProgress(entry.path, percent))
+
+                            val now = System.currentTimeMillis()
+                            if (now - lastProgressTime >= 200) {
+                                val deltaTime = (now - lastProgressTime) / 1000f
+                                val deltaBytes = bytesSent - lastProgressBytes
+                                val speedMbps = if (deltaTime > 0) (deltaBytes / (1024.0 * 1024.0)) / deltaTime else 0.0
+                                val totalElapsed = (now - fileStartTime) / 1000f
+
+                                dispatch(AppIntent.UploadSpeed(
+                                    percent = percent,
+                                    speedMbps = speedMbps.toFloat(),
+                                    fileCount = uploaded + 1,
+                                    elapsedFormatted = String.format("%.1fs", totalElapsed)
+                                ))
+                                lastProgressBytes = bytesSent
+                                lastProgressTime = now
+                            }
+                        }
                     }
 
                     val analysisId = VTResponseParser.extractAnalysisId(result)
-                    val analysisUrl = "https://www.virustotal.com/gui/file-analysis/$analysisId"
 
                     if (analysisId != null) {
+                        val analysisUrl = "https://www.virustotal.com/gui/file-analysis/$analysisId"
                         dispatch(AppIntent.FileUploaded(entry.path, analysisId, analysisUrl))
                         dispatch(AppIntent.LogMessage("  Uploaded $fileName, analysis ID: $analysisId"))
-
-                        // Poll for analysis results
-                        pollAnalysis(entry.path, analysisId, api, entry.md5Hash, entry.fileSizeBytes, entry.fileSizeFormatted)
+                        pendingAnalysis.add(entry to analysisId)
                         container.telemetry.recordUploadSuccess()
                     } else {
                         dispatch(AppIntent.FileProcessed(entry.path, entry.copy(
@@ -327,15 +448,42 @@ class SideEffects(
                     container.telemetry.recordUploadFailure()
                 }
 
+                // Update batch progress after each file (success or failure)
                 uploaded++
-                val elapsed = (System.currentTimeMillis() - startTime) / 1000f
-                dispatch(AppIntent.TotalProgress(uploaded.toFloat() / toUpload.size))
-                dispatch(AppIntent.UploadSpeed(
+                totalBytesUploaded += entry.fileSizeBytes
+                val elapsed = (System.currentTimeMillis() - uploadStartTime) / 1000f
+                val speedMbps = if (elapsed > 0) (totalBytesUploaded / (1024.0 * 1024.0)) / elapsed else 0.0
+                dispatch(AppIntent.TotalProgress(
                     percent = uploaded.toFloat() / toUpload.size,
-                    speedMbps = if (elapsed > 0) uploaded.toFloat() / elapsed else 0f,
+                    speedFormatted = "%.1f MB/s".format(speedMbps),
                     fileCount = uploaded,
                     elapsedFormatted = String.format("%.1fs", elapsed)
                 ))
+                dispatch(AppIntent.UploadSpeed(
+                    percent = uploaded.toFloat() / toUpload.size,
+                    speedMbps = speedMbps.toFloat(),
+                    fileCount = uploaded,
+                    elapsedFormatted = String.format("%.1fs", elapsed)
+                ))
+            }
+
+            dispatch(AppIntent.LogMessage("Upload phase complete. ${pendingAnalysis.size} file(s) queued for analysis."))
+
+            // ═══════════════════════════════════════════════════════════
+            //  PHASE 2: Poll all uploaded files for analysis results
+            // ═══════════════════════════════════════════════════════════
+            if (pendingAnalysis.isNotEmpty()) {
+                dispatch(AppIntent.LogMessage("Phase 2: Polling analysis for ${pendingAnalysis.size} file(s)..."))
+                var polled = 0
+                for ((entry, analysisId) in pendingAnalysis) {
+                    container.pauseController.waitIfPaused()
+                    polled++
+                    dispatch(AppIntent.CurrentProcessingChanged(
+                        File(entry.path).name,
+                        "Polling analysis ($polled/${pendingAnalysis.size})..."
+                    ))
+                    pollAnalysis(entry, analysisId, api)
+                }
             }
 
             dispatch(AppIntent.CurrentProcessingChanged(null, null))
@@ -345,21 +493,17 @@ class SideEffects(
 
     /** Poll VT for analysis results after upload */
     private suspend fun pollAnalysis(
-        filePath: String,
+        entry: FileEntry,
         analysisId: String,
         api: VirusTotalApi,
-        md5Hash: String?,
-        fileSizeBytes: Long,
-        fileSizeFormatted: String,
         maxRetries: Int = container.config.analysisMaxRetries
     ) {
-        val fileName = File(filePath).name
+        val fileName = File(entry.path).name
+        dispatch(AppIntent.LogMessage("  Waiting for analysis of $fileName..."))
         delay(container.config.analysisInitialDelay * 1000L)
 
         for (attempt in 1..maxRetries) {
-            while (container.pauseController.isPaused) {
-                delay(500)
-            }
+            container.pauseController.waitIfPaused()
 
             dispatch(AppIntent.CurrentProcessingChanged(fileName, "Polling analysis ($attempt/$maxRetries)..."))
 
@@ -375,20 +519,27 @@ class SideEffects(
                         val sha256 = VTResponseParser.extractSha256FromAnalysis(result)
                         val lastDate = System.currentTimeMillis() / 1000
 
-                        val updatedEntry = FileEntry(
-                            path = filePath,
-                            fileName = fileName,
-                            fileSizeBytes = fileSizeBytes,
-                            fileSizeFormatted = fileSizeFormatted,
-                            md5Hash = md5Hash,
+                        val updatedEntry = entry.copy(
                             sha256Hash = sha256,
-                            status = FileStatus.HASHED_FOUND,
+                            status = FileStatus.ANALYSIS_COMPLETE,
                             analysisUrl = sha256?.let { "https://www.virustotal.com/gui/file/$it" },
                             detectionRatio = stats,
                             lastAnalysisDate = formatTimestamp(lastDate)
                         )
 
-                        dispatch(AppIntent.AnalysisCompleted(filePath, updatedEntry))
+                        // Cache the analysis result for future scans
+                        container.quotaManager.saveEntry(entry.md5Hash ?: "", QuotaManager.CacheEntry(
+                            filename = fileName,
+                            size = entry.fileSizeBytes,
+                            path = entry.path,
+                            url = updatedEntry.analysisUrl,
+                            lastScan = java.time.LocalDateTime.now().toString(),
+                            status = "completed",
+                            lastAnalysisDate = lastDate,
+                            detections = stats
+                        ))
+
+                        dispatch(AppIntent.AnalysisCompleted(entry.path, updatedEntry))
                         return
                     }
                 }
@@ -402,7 +553,7 @@ class SideEffects(
             }
         }
 
-        dispatch(AppIntent.AnalysisTimeout(filePath))
+        dispatch(AppIntent.AnalysisTimeout(entry.path))
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -446,8 +597,8 @@ class SideEffects(
 
                 val quotas = info?.data?.attributes?.quotas
                 if (quotas != null) {
-                    val daily = quotas.api_requests_daily
-                    val monthly = quotas.api_requests_monthly
+                    val daily = quotas.apiRequestsDaily
+                    val monthly = quotas.apiRequestsMonthly
 
                     if (daily != null) {
                         dispatch(AppIntent.QuotaUpdated(
@@ -621,6 +772,21 @@ class SideEffects(
                         detectionRatio = stats?.ratio,
                         lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
                     ))
+
+                    // Persist to cache so re-drops get the fresh data
+                    withContext(Dispatchers.IO) {
+                        container.quotaManager.saveEntry(hash, QuotaManager.CacheEntry(
+                            filename = entry.fileName,
+                            size = entry.fileSizeBytes,
+                            path = entry.path,
+                            url = sha256?.let { "https://www.virustotal.com/gui/file/$it" },
+                            lastScan = LocalDateTime.now().toString(),
+                            status = "found",
+                            lastAnalysisStats = stats?.description,
+                            lastAnalysisDate = lastDate,
+                            detections = stats?.ratio
+                        ))
+                    }
                 } else {
                     updated.add(entry.copy(status = FileStatus.HASHED_NOT_FOUND))
                 }

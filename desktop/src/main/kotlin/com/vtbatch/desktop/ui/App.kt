@@ -86,7 +86,15 @@ fun App(store: AppStore = remember { AppStore() }) {
                     uploadInfo = if (state.uploadProgress.fileCount > 0)
                         "${state.uploadProgress.elapsedFormatted}, ${state.uploadProgress.speedFormatted} (${state.uploadProgress.fileCount} files)"
                     else "—",
-                    quotaInfo = state.quotaDaily?.formatted ?: "—",
+                    quotaInfo = buildString {
+                        append(state.quotaDaily?.formatted ?: "—")
+                        val monthly = state.quotaMonthly
+                        if (monthly != null) {
+                            append(" / ")
+                            append(monthly.formatted)
+                            append(" mo")
+                        }
+                    },
                     recheckInfo = state.recheckRemaining?.let { remaining ->
                         if (remaining > 0) "${formatSeconds(remaining)} (${state.recheckPendingCount} pending)" else "—"
                     } ?: "—",
