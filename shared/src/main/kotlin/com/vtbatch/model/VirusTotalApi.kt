@@ -14,6 +14,7 @@ import io.ktor.http.content.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.security.MessageDigest
 
@@ -118,8 +119,7 @@ class VirusTotalApi(
 
     /**
      * Upload a file to VirusTotal with optional byte-level progress tracking.
-     * Uses Ktor's onUpload callback to report real-time progress as bytes are
-     * sent over the wire (matches Python's MultipartEncoderMonitor approach).
+     * Files >= 32MB use a special upload URL obtained from /files/upload_url.
      */
     suspend fun uploadFileToVirusTotal(filePath: String, onProgress: ((bytesSent: Long, totalBytes: Long) -> Unit)? = null): JsonObject {
         rateLimiter?.acquire()
@@ -127,10 +127,19 @@ class VirusTotalApi(
 
         if (!file.exists()) throw FileUploadError("File not found: $filePath", mapOf("file_path" to filePath))
 
+        // Pick the right upload URL based on file size
+        val uploadUrl = if (file.length() >= config.largeFileThreshold) {
+            logger.info { "Large file (${formatFileSize(file.length())}), requesting special upload URL..." }
+            getLargeFileUploadUrl()
+                ?: throw FileUploadError("Failed to get upload URL for large file", mapOf("file_path" to filePath))
+        } else {
+            "$baseUrl/files"
+        }
+
         return try {
             val fileBytes = file.readBytes()
             val totalSize = fileBytes.size.toLong()
-            val response = client.post("$baseUrl/files") {
+            val response = client.post(uploadUrl) {
                 header("x-apikey", getApiKey())
                 timeout { requestTimeoutMillis = config.longTimeout * 1000L }
 
@@ -167,6 +176,29 @@ class VirusTotalApi(
         } catch (e: Exception) {
             throw APIConnectionError("Upload failed: ${e.message}", mapOf("file_path" to filePath), e)
         }
+    }
+
+    /** Get special upload URL for files >= 32MB */
+    private suspend fun getLargeFileUploadUrl(): String? {
+        return try {
+            val response = client.get("$baseUrl/files/upload_url") {
+                header("x-apikey", getApiKey())
+                timeout { requestTimeoutMillis = config.shortTimeout * 1000L }
+            }
+            if (response.status.value == 200) {
+                val json = response.body<JsonObject>()
+                json["data"]?.jsonPrimitive?.content
+            } else null
+        } catch (e: Exception) {
+            logger.warn { "Failed to get large file upload URL: ${e.message}" }
+            null
+        }
+    }
+
+    private fun formatFileSize(bytes: Long): String = when {
+        bytes < 1024 -> "$bytes B"
+        bytes < 1024 * 1024 -> String.format("%.1f KB", bytes / 1024.0)
+        else -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
     }
 
     /** Get analysis results by analysis ID */
