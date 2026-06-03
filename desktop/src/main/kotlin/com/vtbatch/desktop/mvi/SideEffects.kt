@@ -530,7 +530,7 @@ class SideEffects(
                             size = entry.fileSizeBytes,
                             path = entry.path,
                             url = updatedEntry.analysisUrl,
-                            lastScan = java.time.Instant.now().toString(),
+                            lastScan = java.time.LocalDateTime.now().toString(),
                             status = "completed",
                             lastAnalysisDate = lastDate,
                             detections = stats
@@ -1048,7 +1048,7 @@ class SideEffects(
         size = entry.fileSizeBytes,
         path = entry.path,
         url = sha256?.let { "${VT_FILE_URL}$it" } ?: entry.analysisUrl,
-        lastScan = Instant.now().toString(),
+        lastScan = LocalDateTime.now().toString(),
         status = "found",
         lastAnalysisStats = stats?.description ?: details?.lastAnalysisStats,
         lastAnalysisDate = lastDate,

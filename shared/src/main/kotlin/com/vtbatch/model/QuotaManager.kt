@@ -115,10 +115,7 @@ class QuotaManager(
         val result = mutableMapOf<String, CacheEntry>()
 
         for ((hashId, entry) in raw) {
-            val lastScan = entry.lastScan?.let {
-                try { LocalDateTime.parse(it) }
-                catch (e: DateTimeParseException) { null }
-            }
+            val lastScan = entry.lastScan?.let { parseTimestamp(it) }
 
             if (lastScan == null) continue
             if (Duration.between(lastScan, now) > cacheDuration) continue
@@ -127,6 +124,24 @@ class QuotaManager(
         }
 
         return result
+    }
+
+    /**
+     * Parse a timestamp string that may be in either Instant format
+     * (e.g. "2026-06-03T09:35:32.510212Z") or LocalDateTime format
+     * (e.g. "2026-06-03T09:35:32.510212"). Returns null if unparseable.
+     */
+    private fun parseTimestamp(value: String): LocalDateTime? {
+        return try {
+            LocalDateTime.parse(value)
+        } catch (e: DateTimeParseException) {
+            try {
+                LocalDateTime.ofInstant(Instant.parse(value), ZoneId.systemDefault())
+            } catch (e2: DateTimeParseException) {
+                logger.warn { "Unparseable cache timestamp: $value" }
+                null
+            }
+        }
     }
 
     private fun loadRaw(): Map<String, CacheEntry> {
