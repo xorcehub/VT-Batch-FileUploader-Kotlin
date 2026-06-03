@@ -20,9 +20,11 @@ data class PendingRecheck(
 /**
  * Tracks files submitted for re-analysis. Uses Kotlin coroutines
  * instead of Python threading for the countdown timer.
+ * Entries older than [ttlMs] are automatically evicted to prevent memory leaks.
  */
 class PendingRecheckTracker(
     private val pollDelaySeconds: Double = 300.0,
+    private val ttlMs: Long = 30 * 60 * 1000L, // 30 minutes default
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 ) : Closeable {
 
@@ -43,6 +45,7 @@ class PendingRecheckTracker(
     fun setOnTimerUpdate(callback: (remainingSeconds: Int, count: Int) -> Unit) { _onTimerUpdate = callback }
 
     fun addPending(filePath: String, md5Hash: String, originalAnalysisDate: Long?) {
+        evictExpired()
         pending[md5Hash] = PendingRecheck(filePath, md5Hash, originalAnalysisDate)
         _pendingCount.value = pending.size
         logger.debug { "Added pending recheck for ${md5Hash.take(8)}..." }
@@ -50,7 +53,10 @@ class PendingRecheckTracker(
 
     fun getPendingCount(): Int = pending.size
 
-    fun getAllPending(): List<PendingRecheck> = pending.values.toList()
+    fun getAllPending(): List<PendingRecheck> {
+        evictExpired()
+        return pending.values.toList()
+    }
 
     fun clearPending(md5Hash: String) {
         pending.remove(md5Hash)
@@ -60,6 +66,17 @@ class PendingRecheckTracker(
     fun clearAll() {
         pending.clear()
         _pendingCount.value = 0
+    }
+
+    /** Remove entries older than TTL to prevent unbounded memory growth */
+    private fun evictExpired() {
+        val cutoff = System.currentTimeMillis() - ttlMs
+        val expired = pending.entries.filter { it.value.submittedAtMs < cutoff }
+        if (expired.isNotEmpty()) {
+            expired.forEach { pending.remove(it.key) }
+            _pendingCount.value = pending.size
+            logger.debug { "Evicted ${expired.size} expired recheck entries (TTL=${ttlMs / 1000}s)" }
+        }
     }
 
     fun startTimer() {

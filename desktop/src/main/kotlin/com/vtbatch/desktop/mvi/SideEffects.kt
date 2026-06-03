@@ -255,7 +255,7 @@ class SideEffects(
             }
             if (hashFailed.isNotEmpty()) {
                 val failedUpdates = hashFailed.map { it.copy(
-                    status = FileStatus.ERROR,
+                    status = FileStatus.HASH_FAILED,
                     errorMessage = "Failed to compute file hash"
                 ) }
                 dispatch(AppIntent.FilesUpdated(failedUpdates))
@@ -691,7 +691,7 @@ class SideEffects(
                 trimmed.equals("update-quota", ignoreCase = true) -> fetchQuota()
                 trimmed.equals("open-red", ignoreCase = true) -> openRedFiles(currentFiles)
                 trimmed.equals("stats", ignoreCase = true) -> showStats()
-                trimmed.equals("api-swap", ignoreCase = true) -> dispatch(AppIntent.LogMessage("api-swap requires .env file support (not yet implemented)."))
+                trimmed.equals("api-swap", ignoreCase = true) -> dispatch(AppIntent.LogMessage("Unknown command. Type 'help' for available commands."))
                 else -> dispatch(AppIntent.LogMessage("Unknown command: $trimmed. Type 'help' for available commands."))
             }
         }

@@ -389,14 +389,14 @@ class SideEffectsTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  api-swap placeholder
+    //  api-swap removed (stub — removed from help listing)
     // ═══════════════════════════════════════════════════════════════════
 
     @Test
-    fun `api-swap shows not-implemented message`() {
+    fun `api-swap shows unknown command message`() {
         val env = createEnv()
         env.sideEffects.executeCommand("api-swap", emptyList())
-        waitForLog(env.dispatched, "not yet implemented")
+        waitForLog(env.dispatched, "Unknown command")
         cleanup(env)
     }
 }

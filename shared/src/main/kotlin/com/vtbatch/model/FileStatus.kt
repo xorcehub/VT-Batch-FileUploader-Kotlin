@@ -11,7 +11,9 @@ enum class FileStatus {
     UPLOADED_AWAITING,    // Upload done, waiting for analysis results
     ANALYSIS_COMPLETE,    // Analysis finished — results available
     ANALYSIS_TIMEOUT,     // Took too long to get analysis results
-    ERROR,                // Something went wrong
+    ERROR,                // Something went wrong (general)
+    HASH_FAILED,          // Failed to compute file hash
+    UPLOAD_FAILED,        // Failed to upload file to VT
     QUEUED_FOR_RECHECK,   // Scheduled for re-analysis
     RECHECKING            // Currently re-checking analysis status
 }
