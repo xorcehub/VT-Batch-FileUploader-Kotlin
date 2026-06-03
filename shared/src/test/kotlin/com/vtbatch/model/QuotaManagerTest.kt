@@ -1,7 +1,9 @@
 package com.vtbatch.model
 
 import java.io.File
+import java.time.Instant
 import java.time.LocalDateTime
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -163,5 +165,92 @@ class QuotaManagerTest {
         val loaded = manager.loadData()
         assertEquals(1, loaded.size)
         assertEquals("new.exe", loaded["hash1"]?.filename)
+    }
+
+    // --- Regression tests for timestamp format mismatch bug ---
+
+    @Test
+    fun `loadData reads Instant-formatted timestamps (Z suffix)`() {
+        // Regression: buildCacheEntry() wrote Instant.now().toString() which
+        // produces "2026-06-03T09:35:32.510212Z" — the Z suffix caused
+        // LocalDateTime.parse() to fail, silently discarding every cache entry.
+        val (manager, file) = tempQuotaManager()
+        val instantTs = Instant.now().toString()  // e.g. "2026-06-03T09:35:32.510212Z"
+        file.writeText("""
+            {
+              "abc123": {
+                "last_scan": "$instantTs",
+                "filename": "malware.exe"
+              }
+            }
+        """.trimIndent())
+
+        val loaded = manager.loadData()
+        assertEquals(1, loaded.size, "Instant-formatted entry should NOT be silently discarded")
+        assertEquals("malware.exe", loaded["abc123"]?.filename)
+    }
+
+    @Test
+    fun `loadData reads LocalDateTime-formatted timestamps (no Z)`() {
+        val (manager, file) = tempQuotaManager()
+        val localTs = LocalDateTime.now().toString()  // e.g. "2026-06-03T09:35:32.510212"
+        file.writeText("""
+            {
+              "def456": {
+                "last_scan": "$localTs",
+                "filename": "clean.exe"
+              }
+            }
+        """.trimIndent())
+
+        val loaded = manager.loadData()
+        assertEquals(1, loaded.size)
+        assertEquals("clean.exe", loaded["def456"]?.filename)
+    }
+
+    @Test
+    fun `loadData handles mixed timestamp formats in same cache file`() {
+        val (manager, file) = tempQuotaManager()
+        val instantTs = Instant.now().toString()
+        val localTs = LocalDateTime.now().toString()
+        file.writeText("""
+            {
+              "hash_instant": {
+                "last_scan": "$instantTs",
+                "filename": "elf-binary"
+              },
+              "hash_local": {
+                "last_scan": "$localTs",
+                "filename": "macho-binary"
+              }
+            }
+        """.trimIndent())
+
+        val loaded = manager.loadData()
+        assertEquals(2, loaded.size, "Both Instant and LocalDateTime entries should be readable")
+        assertNotNull(loaded["hash_instant"])
+        assertNotNull(loaded["hash_local"])
+    }
+
+    @Test
+    fun `loadData skips unparseable timestamps`() {
+        val (manager, file) = tempQuotaManager()
+        file.writeText("""
+            {
+              "good": {
+                "last_scan": "${LocalDateTime.now()}",
+                "filename": "good.exe"
+              },
+              "bad": {
+                "last_scan": "not-a-timestamp-at-all",
+                "filename": "bad.exe"
+              }
+            }
+        """.trimIndent())
+
+        val loaded = manager.loadData()
+        assertEquals(1, loaded.size)
+        assertNotNull(loaded["good"])
+        assertNull(loaded["bad"])
     }
 }
