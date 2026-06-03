@@ -70,8 +70,8 @@ class QuotaManager(
                 for ((filePath, statusData) in fileStatuses) {
                     val md5Hash = statusData["md5_hash"] as? String ?: continue
                     existing[md5Hash] = CacheEntry(
-                        filename = File(filePath).name,
-                        size = File(filePath).length(),
+                        filename = statusData["filename"] as? String ?: File(filePath).name,
+                        size = statusData["size"] as? Long ?: 0L,
                         path = filePath,
                         url = statusData["analysis_url"] as? String,
                         lastScan = LocalDateTime.now().toString(),

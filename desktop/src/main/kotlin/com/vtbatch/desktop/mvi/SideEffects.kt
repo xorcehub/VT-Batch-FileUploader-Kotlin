@@ -63,8 +63,7 @@ class SideEffects(
         scanJob?.cancel()
         processJob?.cancel()
         uploadJob?.cancel()
-        container.pendingRecheckTracker.stopTimer()
-        container.pendingRecheckTracker.clearAll()
+        container.pendingRecheckTracker.close()
     }
 
     fun scanFiles(paths: List<String>) {
