@@ -45,10 +45,10 @@ class AppContainer(
     // Cached VirusTotalApi - invalidated when credentials change
     @Volatile private var _cachedApi: VirusTotalApi? = null
     @Volatile private var _cachedApiKeyValue: String? = null
+    private val apiLock = Any()
 
     val virusTotalApi: VirusTotalApi?
-        get() {
-            // Capture volatile field in local val to avoid TOCTOU race
+        get() = synchronized(apiLock) {
             val key = _apiKey
             if (key == null) return null
             val currentKey = key.get()
@@ -57,13 +57,13 @@ class AppContainer(
                 _cachedApi = VirusTotalApi(currentKey, rateLimiter, config)
                 _cachedApiKeyValue = currentKey
             }
-            return _cachedApi
+            _cachedApi
         }
 
     val apiKey: String? get() = _apiKey?.get()
     val credentialsValid: Boolean get() = _apiKey != null
 
-    fun updateCredentials(apiKey: String) {
+    fun updateCredentials(apiKey: String) = synchronized(apiLock) {
         _apiKey?.clear()
         _apiKey = SecureApiKey(apiKey)
         _cachedApi?.close()
@@ -72,7 +72,7 @@ class AppContainer(
         logger.info { "Credentials updated" }
     }
 
-    fun shutdown() {
+    fun shutdown() = synchronized(apiLock) {
         _cachedApi?.close()
         _cachedApi = null
         _apiKey?.clear()

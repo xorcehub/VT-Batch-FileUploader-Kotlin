@@ -16,16 +16,33 @@ object ExtensionsConfig {
 
     // Default extensions matching the Python version
     private val DEFAULT_EXTENSIONS = setOf(
-        // Executables and Libraries
-        ".exe", ".dll", ".ocx", ".sys", ".scr", ".drv",
-        // Scripting
-        ".bat", ".cmd", ".ps1", ".vbs", ".js", ".wsf", ".hta", ".vbe", ".jse",
+        // Windows Executables and Libraries
+        ".exe", ".dll", ".ocx", ".sys", ".scr", ".drv", ".com", ".cpl",
+        // Windows Installers & Packages
+        ".msi", ".msix", ".appx",
+        // Windows Shortcuts & Scripts
+        ".bat", ".cmd", ".ps1", ".psm1", ".psd1", ".vbs", ".js", ".wsf",
+        ".hta", ".vbe", ".jse", ".lnk", ".url", ".reg", ".inf",
+        // Scripting Languages
+        ".py", ".pyc", ".rb", ".pl", ".lua", ".wsh", ".sct",
         // Office Documents with Macros
         ".docm", ".xlsm", ".pptm",
         // Legacy Office Documents
         ".doc", ".xls", ".ppt",
         // Archives & Installers
-        ".zip", ".rar", ".7z", ".gz", ".iso", ".msi", ".jar",
+        ".zip", ".rar", ".7z", ".gz", ".iso", ".jar", ".cab", ".deb", ".rpm",
+        // macOS
+        ".dmg", ".pkg",
+        // Android
+        ".apk", ".dex", ".aab", ".xapk",
+        // iOS
+        ".ipa",
+        // Linux
+        ".appimage", ".snap", ".flatpak",
+        // Help & Documentation (can contain embedded executables)
+        ".chm", ".hlp",
+        // Disk Images
+        ".img", ".vhd", ".vmdk",
     )
 
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }

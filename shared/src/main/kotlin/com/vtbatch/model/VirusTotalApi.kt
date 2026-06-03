@@ -104,7 +104,10 @@ class VirusTotalApi(
             when (response.status.value) {
                 200 -> response.body<JsonObject>()
                 404 -> null
-                429 -> throw APIRateLimitError("API rate limit exceeded", context = mapOf("hash" to md5Hash))
+                429 -> {
+                    val retryAfter = response.headers["Retry-After"]?.toDoubleOrNull()
+                    throw APIRateLimitError("API rate limit exceeded", retryAfter = retryAfter, context = mapOf("hash" to md5Hash))
+                }
                 else -> throw APIResponseError(
                     "API returned ${response.status.value}",
                     statusCode = response.status.value,
@@ -165,7 +168,10 @@ class VirusTotalApi(
 
             when (response.status.value) {
                 200 -> response.body<JsonObject>()
-                429 -> throw APIRateLimitError("Rate limit exceeded during upload", context = mapOf("file_path" to filePath))
+                429 -> {
+                    val retryAfter = response.headers["Retry-After"]?.toDoubleOrNull()
+                    throw APIRateLimitError("Rate limit exceeded during upload", retryAfter = retryAfter, context = mapOf("file_path" to filePath))
+                }
                 else -> throw APIResponseError(
                     "Upload failed with status ${response.status.value}",
                     statusCode = response.status.value,

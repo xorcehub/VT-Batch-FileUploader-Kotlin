@@ -5,6 +5,7 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -60,7 +61,7 @@ class QuotaManagerTest {
             lastAnalysisStats = "0 malicious, 72 harmless",
             detectionCount = 0
         )
-        assertTrue(manager.saveEntry("abc123hash", entry))
+        assertTrue(runBlocking { manager.saveEntry("abc123hash", entry) })
         val loaded = manager.loadData()
         assertEquals(1, loaded.size)
         val loadedEntry = loaded["abc123hash"]
@@ -123,8 +124,8 @@ class QuotaManagerTest {
     fun `clearCache empties the cache`() {
         val (manager, _) = tempQuotaManager()
         val now = LocalDateTime.now().toString()
-        manager.saveEntry("hash1", QuotaManager.CacheEntry(filename = "a.exe", lastScan = now))
-        assertTrue(manager.clearCache())
+        runBlocking { manager.saveEntry("hash1", QuotaManager.CacheEntry(filename = "a.exe", lastScan = now)) }
+        assertTrue(runBlocking { manager.clearCache() })
         assertTrue(manager.loadData().isEmpty())
     }
 
@@ -138,7 +139,7 @@ class QuotaManagerTest {
                 "analysis_url" to "https://vt.com/file/abc123"
             )
         )
-        assertTrue(manager.saveData(statusData))
+        assertTrue(runBlocking { manager.saveData(statusData) })
         val loaded = manager.loadData()
         assertEquals(1, loaded.size)
         assertNotNull(loaded["abc123"])
@@ -152,7 +153,7 @@ class QuotaManagerTest {
                 "status" to "PENDING"
             )
         )
-        assertTrue(manager.saveData(statusData))
+        assertTrue(runBlocking { manager.saveData(statusData) })
         assertTrue(manager.loadData().isEmpty())
     }
 
@@ -160,8 +161,8 @@ class QuotaManagerTest {
     fun `saveEntry overwrites existing entry`() {
         val (manager, _) = tempQuotaManager()
         val now = LocalDateTime.now().toString()
-        manager.saveEntry("hash1", QuotaManager.CacheEntry(filename = "old.exe", lastScan = now))
-        manager.saveEntry("hash1", QuotaManager.CacheEntry(filename = "new.exe", lastScan = now))
+        runBlocking { manager.saveEntry("hash1", QuotaManager.CacheEntry(filename = "old.exe", lastScan = now)) }
+        runBlocking { manager.saveEntry("hash1", QuotaManager.CacheEntry(filename = "new.exe", lastScan = now)) }
         val loaded = manager.loadData()
         assertEquals(1, loaded.size)
         assertEquals("new.exe", loaded["hash1"]?.filename)

@@ -250,6 +250,19 @@ class SideEffects(
                 it.status == FileStatus.PENDING && it.md5Hash != null
             }
 
+            // Mark files that failed hashing as ERROR (md5Hash == null)
+            val hashFailed = files.filter {
+                it.status == FileStatus.PENDING && it.md5Hash == null
+            }
+            if (hashFailed.isNotEmpty()) {
+                val failedUpdates = hashFailed.map { it.copy(
+                    status = FileStatus.ERROR,
+                    errorMessage = "Failed to compute file hash"
+                ) }
+                dispatch(AppIntent.FilesUpdated(failedUpdates))
+                logger.warn { "${hashFailed.size} files skipped due to failed hashing" }
+            }
+
             if (toProcess.isEmpty()) {
                 dispatch(AppIntent.ProcessingCompleted)
                 return@launch

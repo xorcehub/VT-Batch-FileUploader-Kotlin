@@ -242,7 +242,7 @@ class CheckCommand : Callable<Int> {
                 )
 
                 // Save to cache
-                cache.saveEntry(hash, QuotaManager.CacheEntry(
+                runBlocking { cache.saveEntry(hash, QuotaManager.CacheEntry(
                     filename = filePath?.let { File(it).name },
                     path = filePath,
                     url = data["analysis_url"] as? String,
@@ -250,7 +250,7 @@ class CheckCommand : Callable<Int> {
                     status = "found",
                     lastAnalysisDate = lastDate,
                     detections = stats?.ratio
-                ))
+                )) }
 
                 out.success("check", data)
                 ExitCodes.SUCCESS
@@ -546,7 +546,7 @@ class CacheClearCommand : Callable<Int> {
 
     override fun call(): Int {
         val out = parent.parent.output
-        parent.cache.clearCache()
+        runBlocking { parent.cache.clearCache() }
         out.success("cache clear", mapOf("cleared" to true))
         return ExitCodes.SUCCESS
     }

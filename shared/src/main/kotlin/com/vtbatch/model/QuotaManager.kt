@@ -1,5 +1,7 @@
 package com.vtbatch.model
 
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -17,6 +19,7 @@ private val logger = KotlinLogging.logger {}
 /**
  * Manages file scan data cache (JSON file keyed by MD5 hash).
  * Matches the Python QuotaManager behavior: save, load, expire entries.
+ * All write operations are guarded by a Mutex to prevent concurrent clobbering.
  */
 class QuotaManager(
     cacheFile: String? = null,
@@ -25,6 +28,7 @@ class QuotaManager(
     private val cacheFile = File(cacheFile ?: config.cacheFilename)
     private val cacheDuration = Duration.ofHours(config.cacheDurationHours.toLong())
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true; isLenient = true }
+    private val writeMutex = Mutex()
 
     @Serializable
     data class CacheEntry(
@@ -51,60 +55,66 @@ class QuotaManager(
         @SerialName("total_votes_malicious") val totalVotesMalicious: Int? = null,
     )
 
-    /** Save file statuses to cache */
-    fun saveData(fileStatuses: Map<String, Map<String, Any?>>): Boolean {
-        return try {
-            val existing = loadRaw().toMutableMap()
+    /** Save file statuses to cache (guarded by mutex to prevent concurrent clobbering) */
+    suspend fun saveData(fileStatuses: Map<String, Map<String, Any?>>): Boolean {
+        return writeMutex.withLock {
+            try {
+                val existing = loadRaw().toMutableMap()
 
-            for ((filePath, statusData) in fileStatuses) {
-                val md5Hash = statusData["md5_hash"] as? String ?: continue
-                existing[md5Hash] = CacheEntry(
-                    filename = File(filePath).name,
-                    size = File(filePath).length(),
-                    path = filePath,
-                    url = statusData["analysis_url"] as? String,
-                    lastScan = LocalDateTime.now().toString(),
-                    status = statusData["status"] as? String,
-                    lastAnalysisStats = statusData["last_analysis_stats"]?.toString(),
-                    lastAnalysisDate = statusData["last_analysis_date"] as? Long,
-                )
+                for ((filePath, statusData) in fileStatuses) {
+                    val md5Hash = statusData["md5_hash"] as? String ?: continue
+                    existing[md5Hash] = CacheEntry(
+                        filename = File(filePath).name,
+                        size = File(filePath).length(),
+                        path = filePath,
+                        url = statusData["analysis_url"] as? String,
+                        lastScan = LocalDateTime.now().toString(),
+                        status = statusData["status"] as? String,
+                        lastAnalysisStats = statusData["last_analysis_stats"]?.toString(),
+                        lastAnalysisDate = statusData["last_analysis_date"] as? Long,
+                    )
+                }
+
+                cacheFile.writeText(json.encodeToString(
+                    serializer = kotlinx.serialization.serializer<Map<String, CacheEntry>>(),
+                    value = existing
+                ))
+                true
+            } catch (e: Exception) {
+                logger.error { "Error saving data: $e" }
+                false
             }
-
-            cacheFile.writeText(json.encodeToString(
-                serializer = kotlinx.serialization.serializer<Map<String, CacheEntry>>(),
-                value = existing
-            ))
-            true
-        } catch (e: Exception) {
-            logger.error { "Error saving data: $e" }
-            false
         }
     }
 
-    /** Save a single entry */
-    fun saveEntry(hashId: String, entry: CacheEntry): Boolean {
-        return try {
-            val existing = loadRaw().toMutableMap()
-            existing[hashId] = entry
-            cacheFile.writeText(json.encodeToString(
-                serializer = kotlinx.serialization.serializer<Map<String, CacheEntry>>(),
-                value = existing
-            ))
-            true
-        } catch (e: Exception) {
-            logger.error { "Error saving entry: $e" }
-            false
+    /** Save a single entry (guarded by mutex to prevent concurrent clobbering) */
+    suspend fun saveEntry(hashId: String, entry: CacheEntry): Boolean {
+        return writeMutex.withLock {
+            try {
+                val existing = loadRaw().toMutableMap()
+                existing[hashId] = entry
+                cacheFile.writeText(json.encodeToString(
+                    serializer = kotlinx.serialization.serializer<Map<String, CacheEntry>>(),
+                    value = existing
+                ))
+                true
+            } catch (e: Exception) {
+                logger.error { "Error saving entry: $e" }
+                false
+            }
         }
     }
 
-    /** Clear cache */
-    fun clearCache(): Boolean {
-        return try {
-            cacheFile.writeText("{}")
-            true
-        } catch (e: Exception) {
-            logger.error { "Error clearing cache: $e" }
-            false
+    /** Clear cache (guarded by mutex to prevent concurrent clobbering) */
+    suspend fun clearCache(): Boolean {
+        return writeMutex.withLock {
+            try {
+                cacheFile.writeText("{}")
+                true
+            } catch (e: Exception) {
+                logger.error { "Error clearing cache: $e" }
+                false
+            }
         }
     }
 
