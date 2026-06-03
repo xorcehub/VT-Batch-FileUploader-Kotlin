@@ -20,6 +20,7 @@ const val SHORT_TIMEOUT = 15
 const val LONG_TIMEOUT = 60
 
 // Retry configuration
+const val MAX_FILE_SIZE_MB = 650
 const val MAX_RETRIES = 3
 const val RETRY_DELAY = 1.0
 const val RETRY_BACKOFF = 2.0

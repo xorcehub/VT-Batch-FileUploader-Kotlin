@@ -205,7 +205,7 @@ class CheckCommand : Callable<Int> {
                 out.progress("Computing hash for $filePath...")
                 api.calculateMd5(filePath!!)
             } else if (hashValue != null) {
-                hashValue!!
+                InputValidator.validateHash(hashValue!!)
             } else {
                 out.error("check", "Provide --file or --hash", "InputValidationError", ExitCodes.ERROR)
                 return ExitCodes.ERROR

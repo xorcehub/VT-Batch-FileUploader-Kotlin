@@ -606,7 +606,7 @@ class SideEffects(
         scope.launch {
             try {
                 val info = withContext(Dispatchers.IO) {
-                    getUserInfo(apiKey, apiKey, container.config)
+                    getUserInfo(apiKey, apiKey, container.config, sharedClient = container.virusTotalApi?.client)
                 }
 
                 val quotas = info?.data?.attributes?.quotas
@@ -872,6 +872,17 @@ class SideEffects(
         dispatch(AppIntent.LogMessage("Polling recheck results for ${pending.size} file(s)..."))
 
         for (recheck in pending) {
+            // Mark as actively rechecking so UI shows the correct state
+            val recheckFile = File(recheck.filePath)
+            val recheckingEntry = FileEntry(
+                path = recheck.filePath,
+                fileName = recheckFile.name,
+                fileSizeBytes = if (recheckFile.exists()) recheckFile.length() else 0L,
+                fileSizeFormatted = if (recheckFile.exists()) formatFileSize(recheckFile.length()) else "?",
+                md5Hash = recheck.md5Hash,
+                status = FileStatus.RECHECKING
+            )
+            dispatch(AppIntent.FileProcessed(recheck.filePath, recheckingEntry))
             try {
                 val result = withContext(Dispatchers.IO) {
                     api.checkFileOnVirusTotal(recheck.md5Hash)

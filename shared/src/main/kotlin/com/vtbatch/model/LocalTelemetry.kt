@@ -82,8 +82,11 @@ class LocalTelemetry {
         }
     }
 
-    fun recordProcessingTime(ms: Long) {
-        data = data.copy(totalProcessingTimeMs = data.totalProcessingTimeMs + ms)
+    suspend fun recordProcessingTime(ms: Long) {
+        mutex.withLock {
+            data = data.copy(totalProcessingTimeMs = data.totalProcessingTimeMs + ms)
+            save()
+        }
     }
 
     suspend fun recordSession() {

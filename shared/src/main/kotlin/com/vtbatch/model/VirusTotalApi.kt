@@ -39,7 +39,7 @@ class VirusTotalApi(
     private val secureKey = SecureApiKey(apiKey)
     private val baseUrl = config.apiBaseUrl
 
-    private val client = HttpClient(engine) {
+    val client = HttpClient(engine) {
         install(ContentNegotiation) {
             json(Json { ignoreUnknownKeys = true })
         }
@@ -172,6 +172,16 @@ class VirusTotalApi(
     suspend fun uploadFileToVirusTotal(filePath: String, onProgress: ((bytesSent: Long, totalBytes: Long) -> Unit)? = null): JsonObject {
         rateLimiter?.acquire()
         val file = File(filePath)
+
+        // Pre-flight: reject files exceeding VT's maximum upload size
+        val maxBytes = MAX_FILE_SIZE_MB * 1024L * 1024L
+        if (file.length() > maxBytes) {
+            val sizeMb = String.format("%.1f", file.length() / (1024.0 * 1024.0))
+            throw FileUploadError(
+                "File too large to upload (${sizeMb}MB). VirusTotal maximum is ${MAX_FILE_SIZE_MB}MB.",
+                context = mapOf("file_path" to filePath, "file_size" to file.length(), "max_size" to maxBytes)
+            )
+        }
 
         if (!file.exists()) throw FileUploadError("File not found: $filePath", mapOf("file_path" to filePath))
 

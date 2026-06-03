@@ -6,6 +6,8 @@ import picocli.CommandLine.Option
 import picocli.CommandLine.Parameters
 import picocli.CommandLine.ParentCommand
 import java.util.concurrent.Callable
+import kotlinx.coroutines.runBlocking
+import com.vtbatch.model.LocalTelemetry
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Root command with global options
@@ -69,6 +71,8 @@ class RootCommand : Callable<Int> {
 // ═══════════════════════════════════════════════════════════════════════
 
 fun main(args: Array<String>) {
+    // Record CLI session for telemetry (desktop does this at startup too)
+    runBlocking { LocalTelemetry().recordSession() }
     val exitCode = CommandLine(RootCommand()).execute(*args)
     System.exit(exitCode)
 }

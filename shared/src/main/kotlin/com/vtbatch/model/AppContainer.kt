@@ -28,8 +28,6 @@ class AppContainer(
 
     val pauseController: PauseController by lazy { PauseController() }
 
-    val fileStateManager: FileStateManager by lazy { FileStateManager() }
-
     val credentialStore: CredentialStore by lazy { CredentialStore() }
 
     val quotaManager: QuotaManager by lazy { QuotaManager(config = config) }
