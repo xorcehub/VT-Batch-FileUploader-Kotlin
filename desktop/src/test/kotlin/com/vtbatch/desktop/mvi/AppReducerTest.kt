@@ -113,7 +113,7 @@ class AppReducerTest {
 
     @Test
     fun `CredentialsValidated sets hasCredentials`() {
-        val result = reducer.reduce(initialState, AppIntent.CredentialsValidated("key", "user"))
+        val result = reducer.reduce(initialState, AppIntent.CredentialsValidated("key"))
         assertTrue(result.hasCredentials)
         assertFalse(result.isValidatingCredentials)
     }
