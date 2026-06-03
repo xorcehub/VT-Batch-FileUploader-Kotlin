@@ -29,6 +29,9 @@ class RateLimiter(
     /**
      * Acquire permission to make a request, suspending if needed.
      * Returns the time waited in seconds.
+     *
+     * The entire wait-compute-record cycle is serialized through the mutex
+     * to prevent concurrent coroutines from exceeding the rate limit.
      */
     suspend fun acquire(): Double {
         // Wait if paused
@@ -38,9 +41,7 @@ class RateLimiter(
             }
         }
 
-        // Compute wait time under the lock, then delay outside it so other
-        // coroutines can call tryAcquire / getWaitTime while we sleep.
-        val waitTime = mutex.withLock {
+        return mutex.withLock {
             val now = currentTime()
             var wait = 0.0
 
@@ -58,20 +59,21 @@ class RateLimiter(
                 if (additionalWait > 0) wait = maxOf(wait, additionalWait)
             }
 
-            wait
-        }
+            if (wait > 0) {
+                mutex.unlock()
+                try {
+                    logger.debug { "Rate limiter: waiting ${"%.2f".format(wait)}s" }
+                    delay((wait * 1000).toLong())
+                } finally {
+                    mutex.lock()
+                }
+            }
 
-        if (waitTime > 0) {
-            logger.debug { "Rate limiter: waiting ${"%.2f".format(waitTime)}s" }
-            delay((waitTime * 1000).toLong())
-        }
-
-        mutex.withLock {
             lastRequestTime = currentTime()
             requestTimes.addLast(lastRequestTime)
-        }
 
-        return waitTime
+            wait
+        }
     }
 
     /** Try to acquire without waiting. Returns true if allowed. */

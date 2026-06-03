@@ -90,6 +90,7 @@ data class AppConfig(
     val shortTimeout: Int = envInt("VT_SHORT_TIMEOUT", SHORT_TIMEOUT),
     val longTimeout: Int = envInt("VT_LONG_TIMEOUT", LONG_TIMEOUT),
     val rateLimitPerMinute: Int = envInt("VT_RATE_LIMIT", VT_FREE_TIER_REQUESTS_PER_MINUTE),
+    val maxRetries: Int = envInt("VT_MAX_RETRIES", MAX_RETRIES),
 
     // Upload
     val largeFileThreshold: Int = envInt("VT_LARGE_FILE_THRESHOLD", LARGE_FILE_THRESHOLD),

@@ -25,7 +25,13 @@ class QuotaManager(
     cacheFile: String? = null,
     private val config: AppConfig = AppConfig.default
 ) {
-    private val cacheFile = File(cacheFile ?: config.cacheFilename)
+    private val cacheFile = File(cacheFile ?: config.cacheFilename).let {
+        if (it.isAbsolute) it else {
+            val dir = File(System.getProperty("user.home"), ".vtbatch")
+            dir.mkdirs()
+            File(dir, it.path)
+        }
+    }
     private val cacheDuration = Duration.ofHours(config.cacheDurationHours.toLong())
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true; isLenient = true }
     private val writeMutex = Mutex()

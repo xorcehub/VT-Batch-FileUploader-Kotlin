@@ -50,8 +50,15 @@ object ExtensionsConfig {
     @Serializable
     private data class ExtensionsFile(val extensions: List<String>)
 
+    /** Resolve config file to ~/.vtbatch/ for consistency across launch locations */
+    private fun resolveConfigFile(): File {
+        val dir = File(System.getProperty("user.home"), ".vtbatch")
+        dir.mkdirs()
+        return File(dir, "suspicious_extensions.json")
+    }
+
     private fun loadJsonExtensions(): Set<String> = synchronized(this) {
-        val configFile = File("suspicious_extensions.json")
+        val configFile = resolveConfigFile()
         if (!configFile.exists()) {
             try {
                 val data = ExtensionsFile(DEFAULT_EXTENSIONS.toList())
@@ -106,7 +113,7 @@ object ExtensionsConfig {
     }
 
     private fun saveJsonExtensions(extensions: List<String>) = synchronized(this) { try {
-            val configFile = File("suspicious_extensions.json")
+            val configFile = resolveConfigFile()
             val data = ExtensionsFile(extensions)
             configFile.writeText(json.encodeToString(ExtensionsFile.serializer(), data))
         } catch (e: Exception) {
