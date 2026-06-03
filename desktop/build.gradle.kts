@@ -45,6 +45,7 @@ dependencies {
 
     // Testing
     testImplementation(libs.kotlin.test)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
 
 // Configure how the desktop app runs and gets packaged

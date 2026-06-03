@@ -3,6 +3,7 @@ package com.vtbatch.model
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.*
 import io.ktor.client.call.*
+import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
@@ -23,16 +24,19 @@ private val logger = KotlinLogging.logger {}
 /**
  * VirusTotal API client using Ktor (async HTTP client).
  * Matches the Python version's endpoints and error handling.
+ *
+ * @param engine Optional HTTP engine — pass [MockEngine] in tests to inject responses.
  */
 class VirusTotalApi(
     apiKey: String,
     private val rateLimiter: RateLimiter? = null,
-    private val config: AppConfig = AppConfig.default
+    private val config: AppConfig = AppConfig.default,
+    engine: HttpClientEngine = OkHttp.create()
 ) : java.io.Closeable {
     private val secureKey = SecureApiKey(apiKey)
     private val baseUrl = config.apiBaseUrl
 
-    private val client = HttpClient(OkHttp) {
+    private val client = HttpClient(engine) {
         install(ContentNegotiation) {
             json(Json { ignoreUnknownKeys = true })
         }
