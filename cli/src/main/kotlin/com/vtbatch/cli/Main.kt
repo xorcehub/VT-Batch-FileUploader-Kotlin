@@ -29,9 +29,6 @@ class RootCommand : Callable<Int> {
     @Option(names = ["--api-key"], description = ["VirusTotal API key (or set VT_API_KEY env var)"])
     var apiKey: String? = null
 
-    @Option(names = ["--user"], description = ["VirusTotal username (or set VT_USER env var)"])
-    var user: String? = null
-
     @Option(names = ["--output", "-o"], description = ["Output format: json (default) or text"], defaultValue = "json")
     var outputFormat: String = "json"
 

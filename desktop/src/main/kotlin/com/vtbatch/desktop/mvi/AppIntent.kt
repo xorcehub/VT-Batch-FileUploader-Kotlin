@@ -45,7 +45,7 @@ sealed class AppIntent {
     object HideCredentialDialog : AppIntent()
 
     /** User submitted credentials via the dialog or command */
-    data class SubmitCredentials(val apiKey: String, val user: String, val persist: Boolean = true) : AppIntent()
+    data class SubmitCredentials(val apiKey: String, val persist: Boolean = true) : AppIntent()
 
     /** Find command — search files by name */
     data class FindFiles(val term: String) : AppIntent()
@@ -110,11 +110,14 @@ sealed class AppIntent {
     /** Quota info fetched from VT */
     data class QuotaUpdated(val daily: QuotaData, val monthly: QuotaData) : AppIntent()
 
+    /** Quota fetch failed */
+    data class QuotaError(val message: String) : AppIntent()
+
     /** Recheck timer tick */
     data class RecheckTimerTick(val remainingSeconds: Int, val pendingCount: Int) : AppIntent()
 
     /** Credentials validated successfully */
-    data class CredentialsValidated(val apiKey: String, val user: String) : AppIntent()
+    data class CredentialsValidated(val apiKey: String) : AppIntent()
 
     /** Credentials failed validation */
     data class CredentialsInvalid(val message: String) : AppIntent()

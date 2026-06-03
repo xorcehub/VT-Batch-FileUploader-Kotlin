@@ -224,7 +224,14 @@ object AppReducer {
 
         is AppIntent.QuotaUpdated -> state.copy(
             quotaDaily = intent.daily,
-            quotaMonthly = intent.monthly
+            quotaMonthly = intent.monthly,
+            quotaError = null
+        )
+
+        is AppIntent.QuotaError -> state.copy(
+            quotaDaily = null,
+            quotaMonthly = null,
+            quotaError = intent.message
         )
 
         is AppIntent.RecheckTimerTick -> state.copy(

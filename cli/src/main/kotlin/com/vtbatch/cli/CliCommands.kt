@@ -36,16 +36,14 @@ fun mapExceptionToExitCode(e: Throwable): Int = when (e) {
 }
 
 /** Structured result of API key resolution (Idiom #14) */
-data class ApiKeyResolution(val key: String?, val user: String?)
+data class ApiKeyResolution(val key: String?)
 
 /** Resolve API key from args and env vars */
-fun resolveApiKey(cliKey: String?, cliUser: String?): ApiKeyResolution {
+fun resolveApiKey(cliKey: String?): ApiKeyResolution {
     val key = cliKey
         ?: System.getenv("VT_API_KEY")
         ?: System.getenv("API_KEY")
-    val user = cliUser
-        ?: System.getenv("VT_USER")
-    return ApiKeyResolution(key, user)
+    return ApiKeyResolution(key)
 }
 
 /** Create a VirusTotalApi instance or exit with auth error */
@@ -67,7 +65,7 @@ class ValidateCommand : Callable<Int> {
 
     override fun call(): Int {
         val out = parent.output
-        val (key, user) = resolveApiKey(parent.apiKey, parent.user)
+        val (key) = resolveApiKey(parent.apiKey)
 
         if (key == null) {
             out.error("validate", "No API key provided.", "ConfigurationError", ExitCodes.AUTH_ERROR)
@@ -80,7 +78,7 @@ class ValidateCommand : Callable<Int> {
             api.close()
 
             if (valid) {
-                out.success("validate", mapOf("valid" to true, "user" to (user ?: "unknown")))
+                out.success("validate", mapOf("valid" to true))
                 ExitCodes.SUCCESS
             } else {
                 out.error("validate", "Invalid API key or unauthorized.", "AuthenticationError", ExitCodes.AUTH_ERROR)
@@ -136,7 +134,7 @@ class ScanCommand : Callable<Int> {
         }
 
         val api = if (computeHashes) {
-            val (key, _) = resolveApiKey(parent.apiKey, parent.user)
+            val (key) = resolveApiKey(parent.apiKey)
             createApi(key, out, "scan") ?: return ExitCodes.AUTH_ERROR
         } else null
 
@@ -198,7 +196,7 @@ class CheckCommand : Callable<Int> {
 
     override fun call(): Int {
         val out = parent.output
-        val (key, _) = resolveApiKey(parent.apiKey, parent.user)
+        val (key) = resolveApiKey(parent.apiKey)
         val api = createApi(key, out, "check") ?: return ExitCodes.AUTH_ERROR
 
         return try {
@@ -291,7 +289,7 @@ class UploadCommand : Callable<Int> {
 
     override fun call(): Int {
         val out = parent.output
-        val (key, _) = resolveApiKey(parent.apiKey, parent.user)
+        val (key) = resolveApiKey(parent.apiKey)
         val api = createApi(key, out, "upload") ?: return ExitCodes.AUTH_ERROR
 
         try {
@@ -410,7 +408,7 @@ class ReanalyzeCommand : Callable<Int> {
 
     override fun call(): Int {
         val out = parent.output
-        val (key, _) = resolveApiKey(parent.apiKey, parent.user)
+        val (key) = resolveApiKey(parent.apiKey)
         val api = createApi(key, out, "reanalyze") ?: return ExitCodes.AUTH_ERROR
 
         return try {
@@ -581,16 +579,17 @@ class QuotaCommand : Callable<Int> {
 
     override fun call(): Int {
         val out = parent.output
-        val (key, user) = resolveApiKey(parent.apiKey, parent.user)
+        val (key) = resolveApiKey(parent.apiKey)
 
-        if (key == null || user == null) {
-            out.error("quota", "API key and username required.", "ConfigurationError", ExitCodes.AUTH_ERROR)
+        if (key == null) {
+            out.error("quota", "API key required.", "ConfigurationError", ExitCodes.AUTH_ERROR)
             return ExitCodes.AUTH_ERROR
         }
 
         return try {
             out.progress("Fetching quota info...")
-            val info = runBlocking { getUserInfo(key, user) }
+            // VT API uses the API key itself as the user identifier for quota info
+            val info = runBlocking { getUserInfo(key, key) }
 
             val quotas = info?.data?.attributes?.quotas
             if (quotas != null) {

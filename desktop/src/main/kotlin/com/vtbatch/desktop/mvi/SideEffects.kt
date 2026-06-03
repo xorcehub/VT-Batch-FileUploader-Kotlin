@@ -557,7 +557,7 @@ class SideEffects(
     //  CREDENTIALS
     // ═══════════════════════════════════════════════════════════════════
 
-    fun validateCredentials(apiKey: String, user: String, persist: Boolean = true) {
+    fun validateCredentials(apiKey: String, persist: Boolean = true) {
         scope.launch {
             try {
                 val valid = VirusTotalApi(apiKey, config = container.config).use { tempApi ->
@@ -565,12 +565,12 @@ class SideEffects(
                 }
 
                 if (valid) {
-                    container.updateCredentials(apiKey, user)
+                    container.updateCredentials(apiKey)
                     if (persist) container.credentialStore.save(apiKey)
-                    dispatch(AppIntent.CredentialsValidated(apiKey, user))
+                    dispatch(AppIntent.CredentialsValidated(apiKey))
                     fetchQuota()
                 } else {
-                    dispatch(AppIntent.CredentialsInvalid("Invalid API key or username. Check your credentials."))
+                    dispatch(AppIntent.CredentialsInvalid("Invalid API key. Check your credentials."))
                 }
             } catch (e: Exception) {
                 dispatch(AppIntent.CredentialsInvalid("Validation failed: ${e.message}"))
@@ -583,13 +583,17 @@ class SideEffects(
     // ═══════════════════════════════════════════════════════════════════
 
     fun fetchQuota() {
-        val apiKey = container.apiKey ?: return
-        val user = container.user ?: return
+        val apiKey = container.apiKey
+
+        if (apiKey == null) {
+            // Credentials not yet available — will be retried on validation
+            return
+        }
 
         scope.launch {
             try {
                 val info = withContext(Dispatchers.IO) {
-                    getUserInfo(apiKey, user, container.config)
+                    getUserInfo(apiKey, apiKey, container.config)
                 }
 
                 val quotas = info?.data?.attributes?.quotas
@@ -603,10 +607,15 @@ class SideEffects(
                             monthly = monthly?.let { QuotaData(used = it.used, total = it.allowed) }
                                 ?: QuotaData(0, 0)
                         ))
+                    } else {
+                        dispatch(AppIntent.QuotaError("No daily quota in response"))
                     }
+                } else {
+                    dispatch(AppIntent.QuotaError("Unable to fetch"))
                 }
             } catch (e: Exception) {
                 logger.warn { "Failed to fetch quota: ${e.message}" }
+                dispatch(AppIntent.QuotaError("Error fetching"))
             }
         }
     }
@@ -956,7 +965,6 @@ class SideEffects(
         if (key != null) {
             val masked = key.take(4) + "****" + key.takeLast(4)
             dispatch(AppIntent.LogMessage("API Key: $masked"))
-            dispatch(AppIntent.LogMessage("User: ${container.user ?: "not set"}"))
         } else {
             dispatch(AppIntent.LogMessage("No API key configured. Use the credential dialog or set VT_API_KEY."))
         }

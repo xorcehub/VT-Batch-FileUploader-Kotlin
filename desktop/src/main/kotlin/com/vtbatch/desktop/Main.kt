@@ -11,7 +11,6 @@ import com.vtbatch.desktop.mvi.AppIntent
 import com.vtbatch.desktop.ui.App
 import com.vtbatch.model.CrashLogger
 import com.vtbatch.model.LocalTelemetry
-import com.vtbatch.model.VT_DEFAULT_USER
 import java.awt.Canvas
 import java.awt.Component
 import java.awt.Container
@@ -43,10 +42,9 @@ fun main() = application {
 
     // ── Credentials ──────────────────────────────────────────────────
     val envApiKey = System.getenv("VT_API_KEY")
-    val envUser = System.getenv("VT_USER")
 
     // ── Main UI ─────────────────────────────────────────────────────
-    val store = remember { AppStore(apiKey = envApiKey, user = envUser) }
+    val store = remember { AppStore(apiKey = envApiKey) }
 
     // Auto-prompt for credentials if no env vars set
     LaunchedEffect(Unit) {
@@ -54,13 +52,13 @@ fun main() = application {
             // Check saved credentials from ~/.vtbatch/credentials
             val savedKey = store.container.credentialStore.load()
             if (!savedKey.isNullOrBlank()) {
-                store.dispatch(AppIntent.SubmitCredentials(savedKey, envUser ?: VT_DEFAULT_USER, persist = false))
+                store.dispatch(AppIntent.SubmitCredentials(savedKey, persist = false))
             } else {
                 store.dispatch(AppIntent.ShowCredentialDialog)
             }
         } else {
-            // Env vars found - validate them automatically, don't write to file
-            store.dispatch(AppIntent.SubmitCredentials(envApiKey, envUser ?: VT_DEFAULT_USER, persist = false))
+            // Env var found - validate automatically, don't write to file
+            store.dispatch(AppIntent.SubmitCredentials(envApiKey, persist = false))
         }
     }
 

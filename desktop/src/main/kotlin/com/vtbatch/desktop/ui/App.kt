@@ -88,13 +88,19 @@ fun App(store: AppStore = remember { AppStore() }) {
                     uploadInfo = if (state.uploadProgress.fileCount > 0)
                         "${state.uploadProgress.elapsedFormatted}, ${state.uploadProgress.speedFormatted} (${state.uploadProgress.fileCount} files)"
                     else "—",
-                    quotaInfo = buildString {
-                        append(state.quotaDaily?.formatted ?: "—")
-                        val monthly = state.quotaMonthly
-                        if (monthly != null) {
-                            append(" / ")
-                            append(monthly.formatted)
-                            append(" mo")
+                    quotaInfo = state.quotaError ?: buildString {
+                        val daily = state.quotaDaily
+                        if (daily != null) {
+                            append(daily.formatted)
+                            append(" daily")
+                            val monthly = state.quotaMonthly
+                            if (monthly != null) {
+                                append(" — ")
+                                append(monthly.formatted)
+                                append(" monthly")
+                            }
+                        } else {
+                            append("—")
                         }
                     },
                     recheckInfo = state.recheckRemaining?.let { remaining ->
@@ -108,8 +114,7 @@ fun App(store: AppStore = remember { AppStore() }) {
                     CredentialDialog(
                         onDismiss = { store.dispatch(AppIntent.HideCredentialDialog) },
                         onSubmit = { apiKey ->
-                            // VT API v3 uses /users/current endpoint
-                            store.dispatch(AppIntent.SubmitCredentials(apiKey, VT_DEFAULT_USER))
+                            store.dispatch(AppIntent.SubmitCredentials(apiKey))
                         }
                     )
                 }

@@ -62,10 +62,13 @@ suspend fun getUserInfo(apiKey: String, user: String, config: AppConfig = AppCon
                 header("x-apikey", apiKey)
             }
             if (response.status == HttpStatusCode.OK) response.body<VTUserInfoResponse>()
-            else null
+            else {
+                logger.warn { "getUserInfo non-200: ${response.status}" }
+                null
+            }
         }
     } catch (e: Exception) {
-        logger.error { "Error getting user info: $e" }
+        logger.error { "Error getting user info: ${e.javaClass.simpleName}: ${e.message}" }
         null
     }
 }

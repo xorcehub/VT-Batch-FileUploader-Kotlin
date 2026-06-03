@@ -206,6 +206,26 @@ class AppReducerTest {
     }
 
     @Test
+    fun `QuotaUpdated clears quotaError`() {
+        val state = initialState.copy(quotaError = "Unable to fetch")
+        val result = reducer.reduce(state,
+            AppIntent.QuotaUpdated(QuotaData(42, 500), QuotaData(500, 5000)))
+        assertNull(result.quotaError)
+    }
+
+    @Test
+    fun `QuotaError sets error and clears quota data`() {
+        val state = initialState.copy(
+            quotaDaily = QuotaData(42, 500),
+            quotaMonthly = QuotaData(500, 5000)
+        )
+        val result = reducer.reduce(state, AppIntent.QuotaError("Unable to fetch"))
+        assertNull(result.quotaDaily)
+        assertNull(result.quotaMonthly)
+        assertEquals("Unable to fetch", result.quotaError)
+    }
+
+    @Test
     fun `RecheckTimerTick updates timer state`() {
         val result = reducer.reduce(initialState, AppIntent.RecheckTimerTick(120, 3))
         assertEquals(120, result.recheckRemaining)

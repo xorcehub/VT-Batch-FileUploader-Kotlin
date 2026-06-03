@@ -11,12 +11,9 @@ private val logger = KotlinLogging.logger {}
  */
 class AppContainer(
     apiKey: String? = null,
-    user: String? = null,
     val config: AppConfig = AppConfig.default,
 ) {
     @Volatile private var _apiKey: SecureApiKey? = apiKey?.let { SecureApiKey(it) }
-    @Volatile private var _user: String? = user
-    val user: String? get() = _user
 
     // Lazy singletons — created on first access, reused after that.
     // Kotlin `by lazy` = thread-safe lazy initialization (like Python's @property with caching)
@@ -53,7 +50,7 @@ class AppContainer(
         get() {
             // Capture volatile field in local val to avoid TOCTOU race
             val key = _apiKey
-            if (key == null || _user == null) return null
+            if (key == null) return null
             val currentKey = key.get()
             if (_cachedApi == null || _cachedApiKeyValue != currentKey) {
                 _cachedApi?.close()
@@ -64,16 +61,15 @@ class AppContainer(
         }
 
     val apiKey: String? get() = _apiKey?.get()
-    val credentialsValid: Boolean get() = _apiKey != null && _user != null
+    val credentialsValid: Boolean get() = _apiKey != null
 
-    fun updateCredentials(apiKey: String, user: String) {
+    fun updateCredentials(apiKey: String) {
         _apiKey?.clear()
         _apiKey = SecureApiKey(apiKey)
-        _user = user
         _cachedApi?.close()
         _cachedApi = null
         _cachedApiKeyValue = null
-        logger.info { "Credentials updated for user: $user" }
+        logger.info { "Credentials updated" }
     }
 
     fun shutdown() {

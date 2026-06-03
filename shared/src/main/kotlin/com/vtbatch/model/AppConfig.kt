@@ -12,8 +12,6 @@ private val logger = KotlinLogging.logger {}
 // VirusTotal API rate limits (free tier default)
 const val VT_FREE_TIER_REQUESTS_PER_MINUTE = 20
 
-// VT API v3 default user path segment (/users/current)
-const val VT_DEFAULT_USER = "current"
 const val VT_PREMIUM_TIER_REQUESTS_PER_MINUTE = 1000
 
 // Network timeouts (seconds)

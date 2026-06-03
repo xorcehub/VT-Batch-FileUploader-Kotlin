@@ -42,6 +42,7 @@ data class AppState(
     /** VT API quota information */
     val quotaDaily: QuotaData? = null,
     val quotaMonthly: QuotaData? = null,
+    val quotaError: String? = null,
 
     /** Recheck countdown */
     val recheckRemaining: Int? = null,
