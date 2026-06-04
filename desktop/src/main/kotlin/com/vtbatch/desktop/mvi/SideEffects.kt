@@ -122,13 +122,15 @@ class SideEffects(
                     if (cached != null) {
                         cachedCount++
                         container.telemetry.recordCacheHit()
+                        val cachedStatus = if (cached.status == "HASHED_NOT_FOUND")
+                            FileStatus.HASHED_NOT_FOUND else FileStatus.HASHED_FOUND
                         files.add(FileEntry(
                             path = filePath,
                             fileName = file.name,
                             fileSizeBytes = sizeBytes,
                             fileSizeFormatted = sizeFormatted,
                             md5Hash = md5,
-                            status = FileStatus.HASHED_FOUND,
+                            status = cachedStatus,
                             analysisUrl = cached.url,
                             detectionRatio = cached.detections,
                             lastAnalysisDate = cached.lastAnalysisDate?.let { formatTimestamp(it) },
@@ -324,7 +326,16 @@ class SideEffects(
                             lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
                         ).withDetails(details)
                     } else {
-                        // Not found on VT
+                        // Not found on VT — cache this so we don't burn quota re-checking
+                        withContext(Dispatchers.IO) {
+                            container.quotaManager.saveEntry(entry.md5Hash!!, QuotaManager.CacheEntry(
+                                filename = entry.fileName,
+                                size = entry.fileSizeBytes,
+                                path = entry.path,
+                                lastScan = java.time.LocalDateTime.now().toString(),
+                                status = "HASHED_NOT_FOUND"
+                            ))
+                        }
                         entry.copy(status = FileStatus.HASHED_NOT_FOUND)
                     }
 
