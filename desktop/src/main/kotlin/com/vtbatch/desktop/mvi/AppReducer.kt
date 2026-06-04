@@ -96,7 +96,7 @@ object AppReducer {
             totalProgress = ProgressInfo(),
             currentFile = null,
             currentStatus = null,
-            statusLog = state.statusLog.append("List cleared."),
+            statusLog = state.statusLog.append("File list cleared."),
             findMatches = FindNavigator.FindMatches(),
             expandedFilePath = null
         )

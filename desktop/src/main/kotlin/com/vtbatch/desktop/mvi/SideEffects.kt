@@ -182,8 +182,22 @@ class SideEffects(
                 container.telemetry.recordFilesScanned(files.size)
                 dispatch(AppIntent.FilesScanned(files, summary))
 
-                // Auto-refresh stale cache entries in background so scan returns immediately
-                val stale = files.filter { it.detectionRatio == null && it.md5Hash != null }
+                // Auto-refresh stale cache entries in background so scan returns immediately.
+                // Only refresh entries older than the configured cache TTL.
+                // Recent entries without detection ratio were likely from uploads still
+                // being analyzed — no point re-checking them immediately and burning quota.
+                val staleThreshold = java.time.LocalDateTime.now().minusHours(container.config.cacheDurationHours.toLong())
+                val stale = files.filter { entry ->
+                    entry.detectionRatio == null && entry.md5Hash != null
+                }.filter { entry ->
+                    val cached = cache[entry.md5Hash]
+                    // Only refresh if cache entry is older than the configured TTL
+                    cached != null && try {
+                        java.time.LocalDateTime.parse(cached.lastScan) < staleThreshold
+                    } catch (_: Exception) {
+                        true // unparseable timestamp → treat as stale
+                    }
+                }
                 if (stale.isNotEmpty() && container.virusTotalApi != null) {
                     scope.launch { refreshStaleEntries(stale) }
                 }
