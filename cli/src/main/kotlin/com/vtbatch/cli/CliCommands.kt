@@ -583,7 +583,12 @@ class CacheClearCommand : Callable<Int> {
                 return 1
             }
         }
-        runBlocking { parent.cache.clearCache() }
+        try {
+            runBlocking { parent.cache.clearCache() }
+        } catch (e: CacheError) {
+            out.error("cache clear", e.message ?: "Cache write failed")
+            return ExitCodes.ERROR
+        }
         out.success("cache clear", mapOf("cleared" to true))
         return ExitCodes.SUCCESS
     }

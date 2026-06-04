@@ -717,6 +717,10 @@ class SideEffects(
             appendLine("  update-quota      — Refresh API quota display")
             appendLine("  open-red          — Open malicious/suspicious files in browser")
             appendLine("  stats             — Show local usage statistics")
+            appendLine()
+            appendLine("Tip: API keys set via VT_API_KEY env var are visible to other users")
+            appendLine("     on shared systems. Prefer the credential dialog (AES-encrypted)")
+            appendLine("     for better security.")
         }
         dispatch(AppIntent.LogMessage(help.trimEnd()))
     }
@@ -987,7 +991,8 @@ class SideEffects(
         val key = container.apiKey
         if (key != null) {
             val masked = key.take(4) + "****" + key.takeLast(4)
-            dispatch(AppIntent.LogMessage("API Key: $masked"))
+            val source = if (System.getenv("VT_API_KEY") != null) "environment variable" else "encrypted file"
+            dispatch(AppIntent.LogMessage("API Key: $masked (source: $source)"))
         } else {
             dispatch(AppIntent.LogMessage("No API key configured. Use the credential dialog or set VT_API_KEY."))
         }

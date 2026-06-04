@@ -6,6 +6,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.IOException
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -15,6 +16,9 @@ import java.time.format.DateTimeParseException
 import io.github.oshai.kotlinlogging.KotlinLogging
 
 private val logger = KotlinLogging.logger {}
+
+/** Minimum free disk space required for cache writes (1 MB) */
+private const val MIN_FREE_SPACE_BYTES = 1_048_576L
 
 /**
  * Manages file scan data cache (JSON file keyed by MD5 hash).
@@ -61,6 +65,24 @@ class QuotaManager(
         @SerialName("total_votes_malicious") val totalVotesMalicious: Int? = null,
     )
 
+    /**
+     * Check if there is enough disk space to write the cache.
+     * Returns true if safe to write, false if disk is too full.
+     */
+    private fun checkDiskSpace(): Boolean {
+        val parentDir = cacheFile.parentFile ?: return true
+        if (!parentDir.exists()) return true // will be created by writeText
+        val freeBytes = parentDir.freeSpace
+        if (freeBytes < MIN_FREE_SPACE_BYTES) {
+            logger.error {
+                "Insufficient disk space: ${freeBytes / 1024}KB free in ${parentDir.absolutePath} " +
+                "(minimum ${MIN_FREE_SPACE_BYTES / 1024}KB required)"
+            }
+            return false
+        }
+        return true
+    }
+
     /** Save file statuses to cache (guarded by mutex to prevent concurrent clobbering) */
     suspend fun saveData(fileStatuses: Map<String, Map<String, Any?>>): Boolean {
         return writeMutex.withLock {
@@ -81,14 +103,21 @@ class QuotaManager(
                     )
                 }
 
+                if (!checkDiskSpace()) throw CacheError("Insufficient disk space to write cache (${cacheFile.parent})")
+
                 cacheFile.writeText(json.encodeToString(
                     serializer = kotlinx.serialization.serializer<Map<String, CacheEntry>>(),
                     value = existing
                 ))
                 true
+            } catch (e: IOException) {
+                logger.error { "I/O error writing cache (disk full?): $e" }
+                throw CacheError("I/O error writing cache (disk full?): ${e.message}")
+            } catch (e: CacheError) {
+                throw e
             } catch (e: Exception) {
                 logger.error { "Error saving data: $e" }
-                false
+                throw CacheError("Error saving data: ${e.message}")
             }
         }
     }
@@ -99,14 +128,25 @@ class QuotaManager(
             try {
                 val existing = loadRaw().toMutableMap()
                 existing[hashId] = entry
+
+                if (!checkDiskSpace()) {
+                    logger.error { "Insufficient disk space to write cache (${cacheFile.parent})" }
+                    throw CacheError("Insufficient disk space to write cache (${cacheFile.parent})")
+                }
+
                 cacheFile.writeText(json.encodeToString(
                     serializer = kotlinx.serialization.serializer<Map<String, CacheEntry>>(),
                     value = existing
                 ))
                 true
+            } catch (e: IOException) {
+                logger.error { "I/O error writing cache (disk full?): $e" }
+                throw CacheError("I/O error writing cache (disk full?): ${e.message}")
+            } catch (e: CacheError) {
+                throw e
             } catch (e: Exception) {
                 logger.error { "Error saving entry: $e" }
-                false
+                throw CacheError("Error saving entry: ${e.message}")
             }
         }
     }
@@ -115,11 +155,21 @@ class QuotaManager(
     suspend fun clearCache(): Boolean {
         return writeMutex.withLock {
             try {
+                if (!checkDiskSpace()) {
+                    logger.error { "Insufficient disk space to write cache (${cacheFile.parent})" }
+                    throw CacheError("Insufficient disk space to write cache (${cacheFile.parent})")
+                }
+
                 cacheFile.writeText("{}")
                 true
+            } catch (e: IOException) {
+                logger.error { "I/O error clearing cache: $e" }
+                throw CacheError("I/O error clearing cache: ${e.message}")
+            } catch (e: CacheError) {
+                throw e
             } catch (e: Exception) {
                 logger.error { "Error clearing cache: $e" }
-                false
+                throw CacheError("Error clearing cache: ${e.message}")
             }
         }
     }

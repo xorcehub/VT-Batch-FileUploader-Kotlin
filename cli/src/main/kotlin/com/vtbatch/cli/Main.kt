@@ -28,7 +28,7 @@ import com.vtbatch.model.LocalTelemetry
     ]
 )
 class RootCommand : Callable<Int> {
-    @Option(names = ["--api-key"], description = ["VirusTotal API key (or set VT_API_KEY env var)"])
+    @Option(names = ["--api-key"], description = ["VirusTotal API key (or set VT_API_KEY env var). Note: env vars are visible to other users via /proc on Linux."])
     var apiKey: String? = null
 
     @Option(names = ["--output", "-o"], description = ["Output format: json (default) or text"], defaultValue = "json")
