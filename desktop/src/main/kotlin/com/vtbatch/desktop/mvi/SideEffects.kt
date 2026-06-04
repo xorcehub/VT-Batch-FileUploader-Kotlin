@@ -584,6 +584,12 @@ class SideEffects(
                 } else {
                     dispatch(AppIntent.CredentialsInvalid("Invalid API key. Check your credentials."))
                 }
+            } catch (e: java.net.ConnectException) {
+                dispatch(AppIntent.CredentialsInvalid("Cannot reach VirusTotal servers. Check your internet connection."))
+            } catch (e: java.net.SocketTimeoutException) {
+                dispatch(AppIntent.CredentialsInvalid("Connection timed out. VirusTotal servers may be down or your network is unreachable."))
+            } catch (e: java.net.UnknownHostException) {
+                dispatch(AppIntent.CredentialsInvalid("Cannot resolve VirusTotal hostname. Check your internet connection."))
             } catch (e: Exception) {
                 dispatch(AppIntent.CredentialsInvalid("Validation failed: ${e.message}"))
             }

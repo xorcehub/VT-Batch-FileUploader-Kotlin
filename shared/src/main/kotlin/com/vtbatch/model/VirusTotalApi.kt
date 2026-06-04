@@ -90,21 +90,22 @@ class VirusTotalApi(
         private val RETRY_BACKOFF_FACTOR = RETRY_BACKOFF.toFloat()
     }
 
-    /** Validate API key by hitting /users/current */
+    /**
+     * Validate API key by hitting /users/current.
+     * Returns true if valid, false if invalid (401/403).
+     * Throws on network errors so callers can distinguish "bad key" from "can't reach server".
+     */
     suspend fun validateCredentials(): Boolean {
-        return try {
-            val response = client.get("$baseUrl/users/current") {
+        val response = withRetry {
+            client.get("$baseUrl/users/current") {
                 header("x-apikey", getApiKey())
                 timeout { requestTimeoutMillis = 10_000 }
             }
-            when (response.status.value) {
-                200 -> true
-                401, 403 -> false
-                else -> false
-            }
-        } catch (e: Exception) {
-            logger.error { "Error validating credentials: $e" }
-            false
+        }
+        return when (response.status.value) {
+            200 -> true
+            401, 403 -> false
+            else -> false
         }
     }
 

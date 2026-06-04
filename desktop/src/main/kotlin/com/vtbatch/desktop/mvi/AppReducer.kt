@@ -19,7 +19,12 @@ object AppReducer {
         // ── User actions ────────────────────────────────────────────────
 
         is AppIntent.DropFiles -> state.copy(
-            statusLog = state.statusLog.append("Scanning dropped paths...")
+            statusLog = state.statusLog.append("Scanning dropped paths..."),
+            isScanning = true
+        )
+
+        is AppIntent.ScanStarted -> state.copy(
+            isScanning = true
         )
 
         is AppIntent.SubmitCommand -> state.copy(
@@ -146,7 +151,8 @@ object AppReducer {
             val merged = (existingMap + intent.files.associateBy { it.path }).values.toList()
             state.copy(
                 files = merged,
-                statusLog = state.statusLog.append(intent.summary)
+                statusLog = state.statusLog.append(intent.summary),
+                isScanning = false
             )
         }
 
@@ -262,6 +268,7 @@ object AppReducer {
 
         is AppIntent.Error -> state.copy(
             statusLog = state.statusLog.append("ERROR: ${intent.message}"),
+            isScanning = false,
             isProcessing = if (state.isProcessing) {
                 // Only clear processing if there are no more files being worked on
                 state.files.none { it.status == FileStatus.HASHING || it.status == FileStatus.PENDING }

@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 fun DropZone(
     modifier: Modifier = Modifier,
     isDragOver: Boolean = false,
+    isScanning: Boolean = false,
     onDrop: (List<String>) -> Unit,
     onSubmitCommand: (String) -> Unit
 ) {
@@ -45,10 +46,17 @@ fun DropZone(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = if (isDragOver) "Drop files here..." else "Drag & Drop Files Here",
+                text = when {
+                    isDragOver -> "Drop files here..."
+                    isScanning -> "Scanning directory..."
+                    else -> "Drag & Drop Files Here"
+                },
                 style = MaterialTheme.typography.bodyLarge,
-                color = if (isDragOver) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = when {
+                    isDragOver -> MaterialTheme.colorScheme.primary
+                    isScanning -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
                 textAlign = TextAlign.Center
             )
         }

@@ -60,6 +60,9 @@ data class AppState(
     /** Whether files are being dragged over the window */
     val isDragOver: Boolean = false,
 
+    /** Whether a directory scan is in progress (between drop and file list) */
+    val isScanning: Boolean = false,
+
     /** API key available and valid */
     val hasCredentials: Boolean = false,
 

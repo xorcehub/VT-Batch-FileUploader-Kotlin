@@ -61,6 +61,9 @@ sealed class AppIntent {
     /** File scanning completed — here are the entries (with MD5 hashes and cache status) */
     data class FilesScanned(val files: List<FileEntry>, val summary: String) : AppIntent()
 
+    /** Directory scan started (walking filesystem) */
+    object ScanStarted : AppIntent()
+
     /** A single file was hash-checked against VT */
     data class FileProcessed(val path: String, val updatedEntry: FileEntry) : AppIntent()
 

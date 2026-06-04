@@ -31,6 +31,7 @@ object ExitCodes {
 fun mapExceptionToExitCode(e: Throwable): Int = when (e) {
     is APIRateLimitError -> ExitCodes.RATE_LIMIT
     is APIConnectionError, is APITimeoutError -> ExitCodes.NETWORK_ERROR
+    is java.net.SocketTimeoutException, is java.net.ConnectException, is java.net.UnknownHostException -> ExitCodes.NETWORK_ERROR
     is ConfigurationError -> ExitCodes.AUTH_ERROR
     is VTBatchError -> ExitCodes.ERROR
     else -> ExitCodes.ERROR

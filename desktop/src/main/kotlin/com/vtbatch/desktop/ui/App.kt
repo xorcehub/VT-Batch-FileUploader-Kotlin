@@ -37,6 +37,7 @@ fun App(store: AppStore = remember { AppStore() }) {
                 DropZone(
                     modifier = Modifier.fillMaxWidth(),
                     isDragOver = state.isDragOver,
+                    isScanning = state.isScanning,
                     onDrop = { paths -> store.dispatch(AppIntent.DropFiles(paths)) },
                     onSubmitCommand = { text -> store.dispatch(AppIntent.SubmitCommand(text)) }
                 )
