@@ -43,7 +43,7 @@ class AppContainer(
             pauseController = pauseController
         ).also { _rateLimiter = it }
 
-    val errorHandler: ErrorHandler by lazy { ErrorHandler() }
+    val errorHandler: ErrorHandler get() = ErrorHandler
 
     val pendingRecheckTracker: PendingRecheckTracker by lazy {
         PendingRecheckTracker(pollDelaySeconds = config.recheckBatchPollDelay.toDouble())

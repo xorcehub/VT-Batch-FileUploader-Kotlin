@@ -19,6 +19,12 @@ object AppReducer {
         return (this + "[$timestamp] $message").takeLast(MAX_LOG_SIZE)
     }
 
+    /** Update a single file entry by path, leaving others unchanged. */
+    private fun List<FileEntry>.updateByPath(
+        path: String,
+        transform: (FileEntry) -> FileEntry
+    ): List<FileEntry> = map { if (it.path == path) transform(it) else it }
+
     fun reduce(state: AppState, intent: AppIntent): AppState = when (intent) {
         // ── User actions ────────────────────────────────────────────────
 
@@ -161,9 +167,7 @@ object AppReducer {
         }
 
         is AppIntent.FileProcessed -> state.copy(
-            files = state.files.map {
-                if (it.path == intent.path) intent.updatedEntry else it
-            }
+            files = state.files.updateByPath(intent.path) { intent.updatedEntry }
         )
 
         is AppIntent.CurrentProcessingChanged -> state.copy(
@@ -172,35 +176,25 @@ object AppReducer {
         )
 
         is AppIntent.FileUploaded -> state.copy(
-            files = state.files.map {
-                if (it.path == intent.path) it.copy(
-                    status = FileStatus.UPLOADED_AWAITING,
-                    analysisUrl = intent.analysisUrl
-                ) else it
+            files = state.files.updateByPath(intent.path) {
+                it.copy(status = FileStatus.UPLOADED_AWAITING, analysisUrl = intent.analysisUrl)
             }
         )
 
         is AppIntent.UploadProgress -> state.copy(
-            files = state.files.map {
-                if (it.path == intent.path) it.copy(
-                    status = FileStatus.UPLOADING
-                ) else it
+            files = state.files.updateByPath(intent.path) {
+                it.copy(status = FileStatus.UPLOADING)
             }
         )
 
         is AppIntent.AnalysisCompleted -> state.copy(
-            files = state.files.map {
-                if (it.path == intent.path) intent.updatedEntry else it
-            },
+            files = state.files.updateByPath(intent.path) { intent.updatedEntry },
             statusLog = state.statusLog.append("Analysis complete: ${intent.updatedEntry.fileName}")
         )
 
         is AppIntent.AnalysisTimeout -> state.copy(
-            files = state.files.map {
-                if (it.path == intent.path) it.copy(
-                    status = FileStatus.ANALYSIS_TIMEOUT,
-                    errorMessage = "Analysis timed out"
-                ) else it
+            files = state.files.updateByPath(intent.path) {
+                it.copy(status = FileStatus.ANALYSIS_TIMEOUT, errorMessage = "Analysis timed out")
             },
             statusLog = state.statusLog.append("Analysis timed out for ${state.files.find { it.path == intent.path }?.fileName ?: intent.path}")
         )
@@ -208,7 +202,7 @@ object AppReducer {
         is AppIntent.HashingProgress -> state.copy(
             hashingProgress = ProgressInfo(
                 percent = intent.percent.toDouble(),
-                speedFormatted = "%.1f MB/s".format(intent.speedMbps),
+                speedFormatted = "%.1f MB/s".format(intent.speedMBps),
                 fileCount = intent.fileCount,
                 elapsedFormatted = intent.elapsedFormatted
             )
@@ -217,7 +211,7 @@ object AppReducer {
         is AppIntent.UploadSpeed -> state.copy(
             uploadProgress = ProgressInfo(
                 percent = intent.percent.toDouble(),
-                speedFormatted = "%.1f MB/s".format(intent.speedMbps),
+                speedFormatted = "%.1f MB/s".format(intent.speedMBps),
                 fileCount = intent.fileCount,
                 elapsedFormatted = intent.elapsedFormatted
             )

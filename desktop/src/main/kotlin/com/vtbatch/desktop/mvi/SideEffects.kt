@@ -144,7 +144,7 @@ class SideEffects(
                             firstSubmissionDate = cached.firstSubmissionDate?.let { formatTimestamp(it) },
                             lastSubmissionDate = cached.lastSubmissionDate?.let { formatTimestamp(it) },
                             totalVotes = cached.totalVotesHarmless?.let { h ->
-                                cached.totalVotesMalicious?.let { m -> Pair(h, m) }
+                                cached.totalVotesMalicious?.let { m -> Votes(h, m) }
                             }
                         ))
                     } else {
@@ -164,10 +164,10 @@ class SideEffects(
                     totalBytesHashed += sizeBytes
                     val pct = (index + 1).toFloat() / allSuspicious.size
                     val elapsed = (System.currentTimeMillis() - startTime).toFloat() / 1000f
-                    val speedMbps = if (elapsed > 0) (totalBytesHashed / (1024.0 * 1024.0)) / elapsed else 0.0
+                    val speedMBps = if (elapsed > 0) (totalBytesHashed / (1024.0 * 1024.0)) / elapsed else 0.0
                     dispatch(AppIntent.HashingProgress(
                         percent = pct,
-                        speedMbps = speedMbps.toFloat(),
+                        speedMBps = speedMBps.toFloat(),
                         fileCount = index + 1,
                         elapsedFormatted = String.format("%.1fs", elapsed)
                     ))
@@ -360,16 +360,16 @@ class SideEffects(
                 totalBytesProcessed += entry.fileSizeBytes
                 val pct = processed.toFloat() / toProcess.size
                 val elapsed = (System.currentTimeMillis() - startTime) / 1000f
-                val speedMbps = if (elapsed > 0) (totalBytesProcessed / (1024.0 * 1024.0)) / elapsed else 0.0
+                val speedMBps = if (elapsed > 0) (totalBytesProcessed / (1024.0 * 1024.0)) / elapsed else 0.0
                 dispatch(AppIntent.TotalProgress(
                     percent = pct,
-                    speedFormatted = "%.1f MB/s".format(speedMbps),
+                    speedFormatted = "%.1f MB/s".format(speedMBps),
                     fileCount = processed,
                     elapsedFormatted = String.format("%.1fs", elapsed)
                 ))
                 dispatch(AppIntent.HashingProgress(
                     percent = pct,
-                    speedMbps = speedMbps.toFloat(),
+                    speedMBps = speedMBps.toFloat(),
                     fileCount = processed,
                     elapsedFormatted = String.format("%.1fs", elapsed)
                 ))
@@ -436,12 +436,12 @@ class SideEffects(
                             if (now - lastProgressTime >= 200) {
                                 val deltaTime = (now - lastProgressTime) / 1000f
                                 val deltaBytes = bytesSent - lastProgressBytes
-                                val speedMbps = if (deltaTime > 0) (deltaBytes / (1024.0 * 1024.0)) / deltaTime else 0.0
+                                val speedMBps = if (deltaTime > 0) (deltaBytes / (1024.0 * 1024.0)) / deltaTime else 0.0
                                 val totalElapsed = (now - fileStartTime) / 1000f
 
                                 dispatch(AppIntent.UploadSpeed(
                                     percent = percent,
-                                    speedMbps = speedMbps.toFloat(),
+                                    speedMBps = speedMBps.toFloat(),
                                     fileCount = uploaded + 1,
                                     elapsedFormatted = String.format("%.1fs", totalElapsed)
                                 ))
@@ -486,16 +486,16 @@ class SideEffects(
                 uploaded++
                 totalBytesUploaded += entry.fileSizeBytes
                 val elapsed = (System.currentTimeMillis() - uploadStartTime) / 1000f
-                val speedMbps = if (elapsed > 0) (totalBytesUploaded / (1024.0 * 1024.0)) / elapsed else 0.0
+                val speedMBps = if (elapsed > 0) (totalBytesUploaded / (1024.0 * 1024.0)) / elapsed else 0.0
                 dispatch(AppIntent.TotalProgress(
                     percent = uploaded.toFloat() / toUpload.size,
-                    speedFormatted = "%.1f MB/s".format(speedMbps),
+                    speedFormatted = "%.1f MB/s".format(speedMBps),
                     fileCount = uploaded,
                     elapsedFormatted = String.format("%.1fs", elapsed)
                 ))
                 dispatch(AppIntent.UploadSpeed(
                     percent = uploaded.toFloat() / toUpload.size,
-                    speedMbps = speedMbps.toFloat(),
+                    speedMBps = speedMBps.toFloat(),
                     fileCount = uploaded,
                     elapsedFormatted = String.format("%.1fs", elapsed)
                 ))
@@ -633,7 +633,7 @@ class SideEffects(
         scope.launch {
             try {
                 val info = withContext(Dispatchers.IO) {
-                    getUserInfo(apiKey, apiKey, container.config, sharedClient = container.virusTotalApi?.client)
+                    getUserInfo(apiKey, apiKey, container.config, sharedClient = container.virusTotalApi?.sharedClient)
                 }
 
                 val quotas = info?.data?.attributes?.quotas
@@ -1087,7 +1087,7 @@ class SideEffects(
             firstSubmissionDate = details.firstSubmissionDate?.let { formatTimestamp(it) },
             lastSubmissionDate = details.lastSubmissionDate?.let { formatTimestamp(it) },
             totalVotes = details.totalVotesHarmless?.let { h ->
-                details.totalVotesMalicious?.let { m -> Pair(h, m) }
+                details.totalVotesMalicious?.let { m -> Votes(h, m) }
             }
         )
     }

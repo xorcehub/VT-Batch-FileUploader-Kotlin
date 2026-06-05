@@ -98,7 +98,7 @@ sealed class AppIntent {
     /** Overall hashing progress bar update */
     data class HashingProgress(
         val percent: Float,
-        val speedMbps: Float,
+        val speedMBps: Float,
         val fileCount: Int,
         val elapsedFormatted: String
     ) : AppIntent()
@@ -106,7 +106,7 @@ sealed class AppIntent {
     /** Overall upload progress / speed */
     data class UploadSpeed(
         val percent: Float,
-        val speedMbps: Float,
+        val speedMBps: Float,
         val fileCount: Int,
         val elapsedFormatted: String
     ) : AppIntent()

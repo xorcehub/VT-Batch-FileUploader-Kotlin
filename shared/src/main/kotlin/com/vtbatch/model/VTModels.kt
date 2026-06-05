@@ -20,14 +20,6 @@ data class VTAnalysisResult(
     val analysisUrl: String? = null
 )
 
-data class VTUserInfo(
-    val username: String? = null,
-    val dailyQuotaUsed: Int = 0,
-    val dailyQuotaTotal: Int = 500,
-    val monthlyQuotaUsed: Int = 0,
-    val monthlyQuotaTotal: Int = 5000
-)
-
 data class QuotaData(
     val used: Int,
     val total: Int

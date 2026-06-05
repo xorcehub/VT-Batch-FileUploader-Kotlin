@@ -18,6 +18,9 @@ enum class FileStatus {
     RECHECKING            // Currently re-checking analysis status
 }
 
+/** Named representation of community votes on a file. */
+data class Votes(val harmless: Int, val malicious: Int)
+
 // data class = a class that automatically gets equals(), hashCode(), toString(), copy()
 // Think of it like a Python @dataclass — it's a dumb container for data.
 data class FileEntry(
@@ -43,27 +46,26 @@ data class FileEntry(
     val reputation: Int? = null,                  // community score
     val firstSubmissionDate: String? = null,      // formatted date
     val lastSubmissionDate: String? = null,       // formatted date
-    val totalVotes: Pair<Int, Int>? = null        // (harmless, malicious)
+    val totalVotes: Votes? = null
 ) {
-    // Determined color for the file list entry based on detection results
-    val colorTag: ColorTag
-        get() = when (status) {
-            FileStatus.HASHED_FOUND, FileStatus.ANALYSIS_COMPLETE -> {
-                detectionRatio?.let { ratio ->
-                    val parts = ratio.split("/").map { s -> s.trim().toIntOrNull() }
-                    // If any part is unparseable, treat as NEUTRAL (not CLEAN)
-                    if (parts.size < 2 || parts.any { it == null }) return@let ColorTag.NEUTRAL
-                    val detections = parts[0]!!
-                    when {
-                        detections == 0 -> ColorTag.CLEAN
-                        detections <= 3 -> ColorTag.SUSPICIOUS
-                        else -> ColorTag.MALICIOUS
-                    }
-                } ?: ColorTag.NEUTRAL
-            }
-            FileStatus.ERROR -> ColorTag.ERROR
-            else -> ColorTag.NEUTRAL
+    // Computed once at construction (not on every access).
+    // Recomputed automatically when copy() creates a new instance with different params.
+    val colorTag: ColorTag = when (status) {
+        FileStatus.HASHED_FOUND, FileStatus.ANALYSIS_COMPLETE -> {
+            detectionRatio?.let { ratio ->
+                val parts = ratio.split("/").map { s -> s.trim().toIntOrNull() }
+                if (parts.size < 2 || parts.any { it == null }) return@let ColorTag.NEUTRAL
+                val detections = parts[0]!!
+                when {
+                    detections == 0 -> ColorTag.CLEAN
+                    detections <= 3 -> ColorTag.SUSPICIOUS
+                    else -> ColorTag.MALICIOUS
+                }
+            } ?: ColorTag.NEUTRAL
         }
+        FileStatus.ERROR -> ColorTag.ERROR
+        else -> ColorTag.NEUTRAL
+    }
 }
 
 enum class ColorTag {

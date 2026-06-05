@@ -12,6 +12,7 @@ import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.http.content.*
+import kotlin.math.pow
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
@@ -39,7 +40,10 @@ class VirusTotalApi(
     private val secureKey = SecureApiKey(apiKey)
     private val baseUrl = config.apiBaseUrl
 
-    val client = HttpClient(engine) {
+    /** Expose the HttpClient for connection-pool reuse (e.g. by getUserInfo). */
+    val sharedClient: HttpClient get() = client
+
+    private val client = HttpClient(engine) {
         install(ContentNegotiation) {
             json(Json { ignoreUnknownKeys = true })
         }
@@ -77,7 +81,7 @@ class VirusTotalApi(
                 } else throw e
             }
             if (attempt < config.maxRetries - 1) {
-                val delayMs = (RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF_FACTOR.toDouble(), attempt.toDouble())).toLong()
+                val delayMs = (RETRY_DELAY_MS * RETRY_BACKOFF_FACTOR.toDouble().pow(attempt)).toLong()
                 logger.debug { "Retrying in ${delayMs}ms..." }
                 delay(delayMs)
             }

@@ -16,6 +16,23 @@ private val logger = KotlinLogging.logger {}
  */
 object VTResponseParser {
 
+    // ── JSON field access helpers (eliminate repeated chains) ─────────
+    //
+    // try/catch is intentional: VT's API usually returns the expected types,
+    // but a schema change (e.g. a string field becoming an object) would
+    // cause jsonPrimitive to throw. The original code wrapped every access
+    // in individual try/catch blocks; we preserve that safety here so the
+    // parser degrades gracefully (returns null) instead of crashing.
+
+    private fun JsonObject?.intField(key: String): Int? =
+        try { this?.get(key)?.jsonPrimitive?.content?.toIntOrNull() } catch (_: Exception) { null }
+
+    private fun JsonObject?.stringField(key: String): String? =
+        try { this?.get(key)?.jsonPrimitive?.content } catch (_: Exception) { null }
+
+    private fun JsonObject?.longField(key: String): Long? =
+        try { this?.get(key)?.jsonPrimitive?.content?.toLongOrNull() } catch (_: Exception) { null }
+
     /** Structured detection stats extracted from a VT response. */
     data class DetectionStats(
         val description: String,  // e.g. "2 malicious, 72 total"
@@ -34,7 +51,7 @@ object VTResponseParser {
             if (lastAnalysis != null) {
                 val total = lastAnalysis.size
                 val malicious = lastAnalysis.values.count {
-                    it.jsonObject["category"]?.jsonPrimitive?.content == "malicious"
+                    it.jsonObject.stringField("category") == "malicious"
                 }
                 DetectionStats(
                     description = "$malicious malicious, $total total",
@@ -60,15 +77,15 @@ object VTResponseParser {
             // Try stats object first (has explicit counts)
             val stats = attrs?.get("stats")?.jsonObject
             if (stats != null) {
-                val malicious = stats["malicious"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                val suspicious = stats["suspicious"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                val undetected = stats["undetected"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                val harmless = stats["harmless"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                val malicious = stats.intField("malicious") ?: 0
+                val suspicious = stats.intField("suspicious") ?: 0
+                val undetected = stats.intField("undetected") ?: 0
+                val harmless = stats.intField("harmless") ?: 0
                 val total = malicious + suspicious + undetected + harmless +
-                    (stats["timeout"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0) +
-                    (stats["confirmed-timeout"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0) +
-                    (stats["failure"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0) +
-                    (stats["type-unsupported"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0)
+                    (stats.intField("timeout") ?: 0) +
+                    (stats.intField("confirmed-timeout") ?: 0) +
+                    (stats.intField("failure") ?: 0) +
+                    (stats.intField("type-unsupported") ?: 0)
                 return "$malicious/$total"
             }
 
@@ -77,7 +94,7 @@ object VTResponseParser {
             if (results != null) {
                 val total = results.size
                 val malicious = results.values.count {
-                    it.jsonObject["category"]?.jsonPrimitive?.content == "malicious"
+                    it.jsonObject.stringField("category") == "malicious"
                 }
                 return "$malicious/$total"
             }
@@ -91,40 +108,28 @@ object VTResponseParser {
 
     /** Extract SHA256 hash from a file report response */
     fun extractSha256(json: JsonObject): String? {
-        return try {
-            json["data"]?.jsonObject?.get("id")?.jsonPrimitive?.content
-        } catch (e: Exception) { null }
+        return json["data"]?.jsonObject?.stringField("id")
     }
 
     /** Extract SHA256 from an analysis response */
     fun extractSha256FromAnalysis(json: JsonObject): String? {
-        return try {
-            val meta = json["meta"]?.jsonObject
-            meta?.get("file_info")?.jsonObject?.get("sha256")?.jsonPrimitive?.content
-                ?: json["data"]?.jsonObject?.get("id")?.jsonPrimitive?.content
-        } catch (e: Exception) { null }
+        return json["meta"]?.jsonObject?.get("file_info")?.jsonObject?.stringField("sha256")
+            ?: json["data"]?.jsonObject?.stringField("id")
     }
 
     /** Extract analysis ID from an upload response */
     fun extractAnalysisId(json: JsonObject): String? {
-        return try {
-            json["data"]?.jsonObject?.get("id")?.jsonPrimitive?.content
-        } catch (e: Exception) { null }
+        return json["data"]?.jsonObject?.stringField("id")
     }
 
     /** Extract analysis status from an analysis response (e.g. "completed", "queued") */
     fun extractAnalysisStatus(json: JsonObject): String? {
-        return try {
-            json["data"]?.jsonObject?.get("attributes")?.jsonObject?.get("status")?.jsonPrimitive?.content
-        } catch (e: Exception) { null }
+        return json["data"]?.jsonObject?.get("attributes")?.jsonObject?.stringField("status")
     }
 
     /** Extract last_analysis_date (epoch seconds) from a file report */
     fun extractLastAnalysisDate(json: JsonObject): Long? {
-        return try {
-            json["data"]?.jsonObject?.get("attributes")?.jsonObject
-                ?.get("last_analysis_date")?.jsonPrimitive?.content?.toLongOrNull()
-        } catch (e: Exception) { null }
+        return json["data"]?.jsonObject?.get("attributes")?.jsonObject?.longField("last_analysis_date")
     }
 
     /** Structured file details extracted from a VT file report response. */
@@ -156,11 +161,11 @@ object VTResponseParser {
             val lastAnalysisStats = try {
                 val stats = attrs["last_analysis_stats"]?.jsonObject
                 if (stats != null) {
-                    val malicious = stats["malicious"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                    val suspicious = stats["suspicious"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                    val undetected = stats["undetected"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                    val harmless = stats["harmless"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                    val timeout = stats["timeout"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                    val malicious = stats.intField("malicious") ?: 0
+                    val suspicious = stats.intField("suspicious") ?: 0
+                    val undetected = stats.intField("undetected") ?: 0
+                    val harmless = stats.intField("harmless") ?: 0
+                    val timeout = stats.intField("timeout") ?: 0
                     buildString {
                         if (malicious > 0) append("$malicious malicious, ")
                         if (suspicious > 0) append("$suspicious suspicious, ")
@@ -172,11 +177,9 @@ object VTResponseParser {
             } catch (_: Exception) { null }
 
             // Threat label
-            val threatLabel = try {
-                attrs["popular_threat_classification"]?.jsonObject
-                    ?.get("suggested_threat_label")?.jsonPrimitive?.content
-                    ?: attrs["popular_threat_label"]?.jsonPrimitive?.content
-            } catch (_: Exception) { null }
+            val threatLabel = attrs["popular_threat_classification"]?.jsonObject
+                ?.stringField("suggested_threat_label")
+                ?: attrs.stringField("popular_threat_label")
 
             // Tags
             val tags = try {
@@ -184,28 +187,22 @@ object VTResponseParser {
             } catch (_: Exception) { null }
 
             // Total votes
-            val votesHarmless = try {
-                attrs["total_votes"]?.jsonObject?.get("harmless")?.jsonPrimitive?.content?.toIntOrNull()
-            } catch (_: Exception) { null }
-            val votesMalicious = try {
-                attrs["total_votes"]?.jsonObject?.get("malicious")?.jsonPrimitive?.content?.toIntOrNull()
-            } catch (_: Exception) { null }
+            val votesHarmless = attrs["total_votes"]?.jsonObject?.intField("harmless")
+            val votesMalicious = attrs["total_votes"]?.jsonObject?.intField("malicious")
 
             // Detection count (malicious engines count)
-            val detectionCount = try {
-                attrs["last_analysis_stats"]?.jsonObject?.get("malicious")?.jsonPrimitive?.content?.toIntOrNull()
-            } catch (_: Exception) { null }
+            val detectionCount = attrs["last_analysis_stats"]?.jsonObject?.intField("malicious")
 
             FileDetails(
                 lastAnalysisStats = lastAnalysisStats,
                 popularThreatLabel = threatLabel,
-                typeDescription = try { attrs["type_description"]?.jsonPrimitive?.content } catch (_: Exception) { null },
+                typeDescription = attrs.stringField("type_description"),
                 tags = tags,
-                meaningfulName = try { attrs["meaningful_name"]?.jsonPrimitive?.content } catch (_: Exception) { null },
-                timesSubmitted = try { attrs["times_submitted"]?.jsonPrimitive?.content?.toIntOrNull() } catch (_: Exception) { null },
-                reputation = try { attrs["reputation"]?.jsonPrimitive?.content?.toIntOrNull() } catch (_: Exception) { null },
-                firstSubmissionDate = try { attrs["first_submission_date"]?.jsonPrimitive?.content?.toLongOrNull() } catch (_: Exception) { null },
-                lastSubmissionDate = try { attrs["last_submission_date"]?.jsonPrimitive?.content?.toLongOrNull() } catch (_: Exception) { null },
+                meaningfulName = attrs.stringField("meaningful_name"),
+                timesSubmitted = attrs.intField("times_submitted"),
+                reputation = attrs.intField("reputation"),
+                firstSubmissionDate = attrs.longField("first_submission_date"),
+                lastSubmissionDate = attrs.longField("last_submission_date"),
                 totalVotesHarmless = votesHarmless,
                 totalVotesMalicious = votesMalicious,
                 detectionCount = detectionCount,

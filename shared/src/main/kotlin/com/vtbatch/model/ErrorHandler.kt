@@ -8,7 +8,7 @@ private val logger = KotlinLogging.logger {}
  * Maps exceptions to user-friendly messages.
  * Matches Python's error_handler.py behavior exactly.
  */
-class ErrorHandler {
+object ErrorHandler {
     fun handle(error: Throwable, context: Map<String, Any>? = null): String {
         logError(error, context)
         return getUserMessage(error)

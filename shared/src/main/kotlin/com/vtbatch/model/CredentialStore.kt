@@ -16,8 +16,7 @@ private val logger = KotlinLogging.logger {}
  *
  * The key is encrypted using AES-256-GCM with a machine-specific key derived
  * from JVM system properties. This prevents the API key from being readable
- * at a glance in the credentials file. The encryption key file is stored
- * alongside the credentials in ~/.vtbatch/.key.
+ * at a glance in the credentials file.
  *
  * Note: This is defense-in-depth, not a substitute for OS keychain storage.
  * A determined local attacker with file access can recover the key.
@@ -37,7 +36,7 @@ class CredentialStore(
     private val fileName: String = "credentials"
 ) {
     private val file = File(dir, fileName)
-    private val keyFile = File(dir, ".key")
+    private val secureRandom = SecureRandom()
 
     companion object {
         private const val ALGORITHM = "AES"
@@ -72,7 +71,7 @@ class CredentialStore(
 
             // Generate random IV for GCM
             val iv = ByteArray(GCM_IV_LENGTH)
-            SecureRandom().nextBytes(iv)
+            secureRandom.nextBytes(iv)
 
             // Use machine-derived key
             val keyBytes = deriveMachineKey()

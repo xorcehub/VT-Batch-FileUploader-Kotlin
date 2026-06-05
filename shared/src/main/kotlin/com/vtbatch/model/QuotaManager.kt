@@ -37,7 +37,7 @@ class QuotaManager(
         }
     }
     private val cacheDuration = Duration.ofHours(config.cacheDurationHours.toLong())
-    private val json = Json { ignoreUnknownKeys = true; prettyPrint = true; isLenient = true }
+    private val json = Json { ignoreUnknownKeys = true }
     private val writeMutex = Mutex()
 
     @Serializable

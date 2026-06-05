@@ -106,8 +106,7 @@ fun FileListEntry(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        if (file.md5Hash != null) {
-                            val hash: String = file.md5Hash!!
+                        file.md5Hash?.let { hash ->
                             Text(
                                 text = "  |  Hash: ${hash.take(16)}...",
                                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
@@ -218,8 +217,8 @@ private fun FileDetailPanel(file: FileEntry, accentColor: androidx.compose.ui.gr
                 }
                 DetailRow("Reputation", "$sign$rep", valueColor = repColor)
             }
-            file.totalVotes?.let { (harmless, malicious) ->
-                DetailRow("Votes", "$harmless harmless / $malicious malicious")
+            file.totalVotes?.let { votes ->
+                DetailRow("Votes", "${votes.harmless} harmless / ${votes.malicious} malicious")
             }
             file.timesSubmitted?.let { DetailRow("Submitted", "${it}x") }
             file.firstSubmissionDate?.let { DetailRow("First Seen", it) }
