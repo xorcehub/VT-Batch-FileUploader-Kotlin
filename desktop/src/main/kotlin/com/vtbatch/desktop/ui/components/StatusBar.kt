@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -36,32 +37,32 @@ fun StatusBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            StatusChip(label = "Hashing", value = hashingInfo)
-            StatusChip(label = "Upload", value = uploadInfo)
-            StatusChip(label = "Quota", value = quotaInfo)
-            StatusChip(label = "Recheck", value = recheckInfo)
-
-            Spacer(Modifier.weight(1f))
+            // Weighted chips shrink when space is tight; icons (non-weight)
+            // are always measured first by Compose, so they never shrink.
+            StatusChip(label = "Hashing", value = hashingInfo, modifier = Modifier.weight(1f))
+            StatusChip(label = "Upload", value = uploadInfo, modifier = Modifier.weight(1f))
+            StatusChip(label = "Quota", value = quotaInfo, modifier = Modifier.weight(1f))
+            StatusChip(label = "Recheck", value = recheckInfo, modifier = Modifier.weight(1f))
 
             IconButton(
                 onClick = onApiKeyClick,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(24.dp)
             ) {
                 if (hasCredentials) {
                     Icon(
                         imageVector = Icons.Default.CheckCircle,
                         contentDescription = "API Key (configured)",
-                        modifier = Modifier.size(14.dp),
+                        modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.primary
                     )
                 } else {
                     Icon(
                         imageVector = Icons.Default.Key,
                         contentDescription = "API Key (not set)",
-                        modifier = Modifier.size(14.dp),
+                        modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -69,12 +70,12 @@ fun StatusBar(
 
             IconButton(
                 onClick = onSettingsClick,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(24.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Settings,
                     contentDescription = "Settings",
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -83,15 +84,17 @@ fun StatusBar(
 }
 
 @Composable
-private fun StatusChip(label: String, value: String) {
-    Row {
+private fun StatusChip(label: String, value: String, modifier: Modifier = Modifier) {
+    Row(modifier = modifier) {
         Text(
             text = "$label: ",
             style = MaterialTheme.typography.labelSmall.copy(
                 fontFamily = FontFamily.Monospace,
                 fontSize = 10.sp
             ),
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
         Text(
             text = value,
@@ -99,7 +102,9 @@ private fun StatusChip(label: String, value: String) {
                 fontFamily = FontFamily.Monospace,
                 fontSize = 10.sp
             ),
-            color = MaterialTheme.colorScheme.onSurface
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
