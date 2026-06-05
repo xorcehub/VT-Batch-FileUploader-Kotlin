@@ -44,6 +44,15 @@ sealed class AppIntent {
     /** User dismissed the credential dialog */
     object HideCredentialDialog : AppIntent()
 
+    /** User opened the settings dialog */
+    object ShowSettingsDialog : AppIntent()
+
+    /** User dismissed the settings dialog */
+    object HideSettingsDialog : AppIntent()
+
+    /** User saved settings from the dialog */
+    data class SaveSettings(val settings: UserSettings) : AppIntent()
+
     /** User submitted credentials via the dialog or command */
     data class SubmitCredentials(val apiKey: String, val persist: Boolean = true) : AppIntent()
 
@@ -139,4 +148,10 @@ sealed class AppIntent {
 
     /** Upload batch completed */
     object UploadCompleted : AppIntent()
+
+    /** Settings were applied successfully */
+    data class SettingsSaved(val overriddenFields: Set<String>) : AppIntent()
+
+    /** Settings failed to save */
+    data class SettingsError(val message: String) : AppIntent()
 }

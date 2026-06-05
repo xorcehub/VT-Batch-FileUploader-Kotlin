@@ -1,6 +1,9 @@
 package com.vtbatch.model
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 private val logger = KotlinLogging.logger {}
 
@@ -11,26 +14,34 @@ private val logger = KotlinLogging.logger {}
  */
 class AppContainer(
     apiKey: String? = null,
-    val config: AppConfig = AppConfig.default,
+    initialConfig: AppConfig = AppConfig.default,
+    val settingsStore: SettingsStore = SettingsStore()
 ) {
+    // Mutable config — can be updated at runtime via settings dialog.
+    // Readers use `config` (returns current value) — no existing callers need to change.
+    private val _config = MutableStateFlow(initialConfig)
+    val config: AppConfig get() = _config.value
+    val configFlow: StateFlow<AppConfig> = _config.asStateFlow()
+
     @Volatile private var _apiKey: SecureApiKey? = apiKey?.let { SecureApiKey(it) }
 
     // Lazy singletons — created on first access, reused after that.
-    // Kotlin `by lazy` = thread-safe lazy initialization (like Python's @property with caching)
-    private val _rateLimiter: RateLimiter by lazy {
-        RateLimiter(
-            requestsPerMinute = config.rateLimitPerMinute,
-            pauseController = pauseController
-        )
-    }
-
-    val rateLimiter: RateLimiter get() = _rateLimiter
-
-    val pauseController: PauseController by lazy { PauseController() }
+    private val pauseControllerBacking: PauseController by lazy { PauseController() }
+    val pauseController: PauseController get() = pauseControllerBacking
 
     val credentialStore: CredentialStore by lazy { CredentialStore() }
 
-    val quotaManager: QuotaManager by lazy { QuotaManager(config = config) }
+    // QuotaManager + RateLimiter: recreated when config changes (same pattern as VirusTotalApi)
+    @Volatile private var _quotaManager: QuotaManager? = null
+    val quotaManager: QuotaManager
+        get() = _quotaManager ?: QuotaManager(config = config).also { _quotaManager = it }
+
+    @Volatile private var _rateLimiter: RateLimiter? = null
+    val rateLimiter: RateLimiter
+        get() = _rateLimiter ?: RateLimiter(
+            requestsPerMinute = config.rateLimitPerMinute,
+            pauseController = pauseController
+        ).also { _rateLimiter = it }
 
     val errorHandler: ErrorHandler by lazy { ErrorHandler() }
 
@@ -40,7 +51,7 @@ class AppContainer(
 
     val telemetry: LocalTelemetry by lazy { LocalTelemetry() }
 
-    // Cached VirusTotalApi - invalidated when credentials change
+    // Cached VirusTotalApi - invalidated when credentials or config change
     @Volatile private var _cachedApi: VirusTotalApi? = null
     @Volatile private var _cachedApiKeyValue: String? = null
     private val apiLock = Any()
@@ -68,6 +79,19 @@ class AppContainer(
         _cachedApi = null
         _cachedApiKeyValue = null
         logger.info { "Credentials updated" }
+    }
+
+    /** Apply new config at runtime (from settings dialog). Rebuilds derived services. */
+    fun updateConfig(newConfig: AppConfig) {
+        _config.value = newConfig
+        synchronized(apiLock) {
+            _cachedApi?.close()
+            _cachedApi = null
+            _cachedApiKeyValue = null
+        }
+        _quotaManager = null
+        _rateLimiter = null
+        logger.info { "Config updated" }
     }
 
     fun shutdown() = synchronized(apiLock) {

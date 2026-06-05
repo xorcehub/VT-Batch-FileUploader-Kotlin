@@ -25,7 +25,7 @@ class AppReducerTest {
     @Test
     fun `SubmitCommand echoes command to log`() {
         val result = reducer.reduce(initialState, AppIntent.SubmitCommand("help"))
-        assertEquals("> help", result.statusLog.last())
+        assertTrue(result.statusLog.last().endsWith("> help"))
     }
 
     @Test
@@ -256,7 +256,7 @@ class AppReducerTest {
     @Test
     fun `LogMessage adds to status log`() {
         val result = reducer.reduce(initialState, AppIntent.LogMessage("Info message"))
-        assertEquals("Info message", result.statusLog.last())
+        assertTrue(result.statusLog.last().endsWith("Info message"))
     }
 
     // ── Find ────────────────────────────────────────────────────────

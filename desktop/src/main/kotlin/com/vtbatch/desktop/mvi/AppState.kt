@@ -67,5 +67,11 @@ data class AppState(
     val hasCredentials: Boolean = false,
 
     /** Currently expanded file row (click to toggle detail panel) */
-    val expandedFilePath: String? = null
+    val expandedFilePath: String? = null,
+
+    /** Whether the settings dialog is visible */
+    val showSettingsDialog: Boolean = false,
+
+    /** Which fields are overridden by env vars */
+    val envOverriddenFields: Set<String> = emptySet()
 )

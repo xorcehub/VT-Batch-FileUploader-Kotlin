@@ -12,8 +12,12 @@ object AppReducer {
 
     private const val MAX_LOG_SIZE = 500
 
-    private fun List<String>.append(message: String): List<String> =
-        (this + message).takeLast(MAX_LOG_SIZE)
+    private fun List<String>.append(message: String): List<String> {
+        val timestamp = java.time.LocalTime.now().format(
+            java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")
+        )
+        return (this + "[$timestamp] $message").takeLast(MAX_LOG_SIZE)
+    }
 
     fun reduce(state: AppState, intent: AppIntent): AppState = when (intent) {
         // ── User actions ────────────────────────────────────────────────
@@ -287,6 +291,26 @@ object AppReducer {
             currentFile = null,
             currentStatus = null,
             statusLog = state.statusLog.append("Upload batch complete.")
+        )
+
+        // ── Settings ────────────────────────────────────────────────────
+
+        is AppIntent.ShowSettingsDialog -> state.copy(showSettingsDialog = true)
+
+        is AppIntent.HideSettingsDialog -> state.copy(showSettingsDialog = false)
+
+        is AppIntent.SaveSettings -> state.copy(
+            statusLog = state.statusLog.append("Saving settings...")
+        )
+
+        is AppIntent.SettingsSaved -> state.copy(
+            showSettingsDialog = false,
+            envOverriddenFields = intent.overriddenFields,
+            statusLog = state.statusLog.append("Settings applied.")
+        )
+
+        is AppIntent.SettingsError -> state.copy(
+            statusLog = state.statusLog.append("ERROR: ${intent.message}")
         )
     }
 }

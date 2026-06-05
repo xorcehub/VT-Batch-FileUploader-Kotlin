@@ -22,7 +22,8 @@ import kotlinx.coroutines.flow.update
 
 class AppStore(
     apiKey: String? = null,
-    val container: AppContainer = AppContainer(apiKey = apiKey)
+    initialConfig: AppConfig = AppConfig.default,
+    val container: AppContainer = AppContainer(apiKey = apiKey, initialConfig = initialConfig)
 ) {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val _state = MutableStateFlow(AppState())
@@ -73,6 +74,10 @@ class AppStore(
 
             is AppIntent.SubmitCredentials -> {
                 sideEffects.validateCredentials(intent.apiKey, intent.persist)
+            }
+
+            is AppIntent.SaveSettings -> {
+                sideEffects.saveSettings(intent.settings)
             }
 
             is AppIntent.SubmitCommand -> {

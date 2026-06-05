@@ -507,87 +507,84 @@ class SideEffects(
             //  PHASE 2: Poll all uploaded files for analysis results
             // ═══════════════════════════════════════════════════════════
             if (pendingAnalysis.isNotEmpty()) {
+                dispatch(AppIntent.LogMessage("Phase 2: Waiting ${container.config.analysisInitialDelay}s for VT to process ${pendingAnalysis.size} file(s)..."))
+                delay(container.config.analysisInitialDelay * 1000L)
+
                 dispatch(AppIntent.LogMessage("Phase 2: Polling analysis for ${pendingAnalysis.size} file(s)..."))
-                var polled = 0
-                for ((entry, analysisId) in pendingAnalysis) {
-                    container.pauseController.waitIfPaused()
-                    polled++
-                    dispatch(AppIntent.CurrentProcessingChanged(
-                        File(entry.path).name,
-                        "Polling analysis ($polled/${pendingAnalysis.size})..."
-                    ))
-                    pollAnalysis(entry, analysisId, api)
+
+                // Round-robin polling: poll all files, then re-poll unfinished ones
+                val remaining = pendingAnalysis.toMutableList()
+                var round = 0
+                val maxRounds = container.config.analysisMaxRetries
+
+                while (remaining.isNotEmpty() && round < maxRounds) {
+                    round++
+                    val iterator = remaining.iterator()
+                    while (iterator.hasNext()) {
+                        container.pauseController.waitIfPaused()
+                        val (entry, analysisId) = iterator.next()
+                        val fileName = File(entry.path).name
+                        dispatch(AppIntent.CurrentProcessingChanged(
+                            fileName,
+                            "Polling round $round ($maxRounds max)..."
+                        ))
+
+                        try {
+                            val result = withContext(Dispatchers.IO) {
+                                api.getAnalysisResults(analysisId)
+                            }
+
+                            if (result != null) {
+                                val status = VTResponseParser.extractAnalysisStatus(result)
+                                if (status == "completed") {
+                                    val stats = VTResponseParser.extractDetectionStatsFromAnalysis(result)
+                                    val sha256 = VTResponseParser.extractSha256FromAnalysis(result)
+                                    val lastDate = System.currentTimeMillis() / 1000
+
+                                    val updatedEntry = entry.copy(
+                                        sha256Hash = sha256,
+                                        status = FileStatus.ANALYSIS_COMPLETE,
+                                        analysisUrl = sha256?.let { "${VT_FILE_URL}$it" },
+                                        detectionRatio = stats,
+                                        lastAnalysisDate = formatTimestamp(lastDate)
+                                    )
+
+                                    container.quotaManager.saveEntry(entry.md5Hash ?: "", QuotaManager.CacheEntry(
+                                        filename = fileName,
+                                        size = entry.fileSizeBytes,
+                                        path = entry.path,
+                                        url = updatedEntry.analysisUrl,
+                                        lastScan = java.time.LocalDateTime.now().toString(),
+                                        status = "completed",
+                                        lastAnalysisDate = lastDate,
+                                        detections = stats
+                                    ))
+
+                                    dispatch(AppIntent.AnalysisCompleted(entry.path, updatedEntry))
+                                    iterator.remove()
+                                }
+                            }
+                        } catch (e: Exception) {
+                            logger.warn { "Analysis poll error for $fileName: ${e.message}" }
+                        }
+                    }
+
+                    // Wait between rounds (not after the last one)
+                    if (remaining.isNotEmpty() && round < maxRounds) {
+                        dispatch(AppIntent.CurrentProcessingChanged(null, "Waiting ${container.config.analysisPollInterval}s for next round..."))
+                        delay(container.config.analysisPollInterval * 1000L)
+                    }
+                }
+
+                // Timeout any files that didn't complete
+                for ((entry, _) in remaining) {
+                    dispatch(AppIntent.AnalysisTimeout(entry.path))
                 }
             }
 
             dispatch(AppIntent.CurrentProcessingChanged(null, null))
             dispatch(AppIntent.UploadCompleted)
         }
-    }
-
-    /** Poll VT for analysis results after upload */
-    private suspend fun pollAnalysis(
-        entry: FileEntry,
-        analysisId: String,
-        api: VirusTotalApi,
-        maxRetries: Int = container.config.analysisMaxRetries
-    ) {
-        val fileName = File(entry.path).name
-        dispatch(AppIntent.LogMessage("  Waiting for analysis of $fileName..."))
-        delay(container.config.analysisInitialDelay * 1000L)
-
-        for (attempt in 1..maxRetries) {
-            container.pauseController.waitIfPaused()
-
-            dispatch(AppIntent.CurrentProcessingChanged(fileName, "Polling analysis ($attempt/$maxRetries)..."))
-
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    api.getAnalysisResults(analysisId)
-                }
-
-                if (result != null) {
-                    val status = VTResponseParser.extractAnalysisStatus(result)
-                    if (status == "completed") {
-                        val stats = VTResponseParser.extractDetectionStatsFromAnalysis(result)
-                        val sha256 = VTResponseParser.extractSha256FromAnalysis(result)
-                        val lastDate = System.currentTimeMillis() / 1000
-
-                        val updatedEntry = entry.copy(
-                            sha256Hash = sha256,
-                            status = FileStatus.ANALYSIS_COMPLETE,
-                            analysisUrl = sha256?.let { "${VT_FILE_URL}$it" },
-                            detectionRatio = stats,
-                            lastAnalysisDate = formatTimestamp(lastDate)
-                        )
-
-                        // Cache the analysis result for future scans
-                        container.quotaManager.saveEntry(entry.md5Hash ?: "", QuotaManager.CacheEntry(
-                            filename = fileName,
-                            size = entry.fileSizeBytes,
-                            path = entry.path,
-                            url = updatedEntry.analysisUrl,
-                            lastScan = java.time.LocalDateTime.now().toString(),
-                            status = "completed",
-                            lastAnalysisDate = lastDate,
-                            detections = stats
-                        ))
-
-                        dispatch(AppIntent.AnalysisCompleted(entry.path, updatedEntry))
-                        return
-                    }
-                }
-            } catch (e: Exception) {
-                logger.warn { "Analysis poll error for $fileName: ${e.message}" }
-            }
-
-            if (attempt < maxRetries) {
-                dispatch(AppIntent.CurrentProcessingChanged(fileName, "Waiting for analysis..."))
-                delay(container.config.analysisPollInterval * 1000L)
-            }
-        }
-
-        dispatch(AppIntent.AnalysisTimeout(entry.path))
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1146,6 +1143,24 @@ class SideEffects(
                 LocalDateTime.parse(dateStr, DateTimeFormatter.ofPattern("yyyy-MM-dd"))
                     .atZone(ZoneId.systemDefault()).toEpochSecond()
             } catch (e2: Exception) { null }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SETTINGS
+    // ═══════════════════════════════════════════════════════════════════
+
+    fun saveSettings(settings: UserSettings) {
+        scope.launch {
+            try {
+                container.settingsStore.save(settings)
+                val (newConfig, overridden) = AppConfig.resolve(settings)
+                container.updateConfig(newConfig)
+                dispatch(AppIntent.SettingsSaved(overridden))
+            } catch (e: Exception) {
+                val msg = container.errorHandler.handle(e)
+                dispatch(AppIntent.SettingsError(msg))
+            }
         }
     }
 }
