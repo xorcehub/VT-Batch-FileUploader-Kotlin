@@ -12,6 +12,8 @@ import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.http.content.*
+import kotlinx.io.asSource
+import kotlinx.io.buffered
 import kotlin.math.pow
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.delay
@@ -208,15 +210,17 @@ class VirusTotalApi(
                 setBody(
                     MultiPartFormDataContent(
                         formData {
-                            append("file", file.name, ContentType("application", "octet-stream")) {
-                                file.inputStream().buffered().use { input ->
-                                    val buffer = ByteArray(8192)
-                                    var read = input.read(buffer)
-                                    while (read != -1) {
-                                        write(buffer, 0, read)
-                                        read = input.read(buffer)
-                                    }
-                                }
+                            // Stream from file via InputProvider instead of buffering
+                            // the entire file into memory. Prevents OOM for large uploads.
+                            appendInput(
+                                key = "file",
+                                headers = Headers.build {
+                                    append(HttpHeaders.ContentDisposition, "filename=${file.name}")
+                                    append(HttpHeaders.ContentType, "application/octet-stream")
+                                },
+                                size = file.length()
+                            ) {
+                                file.inputStream().buffered().asSource().buffered()
                             }
                         }
                     )
