@@ -298,7 +298,7 @@ class VirusTotalApi(
 
         return withRetry {
             try {
-                val response = client.post("$baseUrl/files/$hash/reanalyse") {
+                val response = client.post("$baseUrl/files/$hash/analyse") {
                     header("x-apikey", getApiKey())
                 }
                 when (response.status.value) {

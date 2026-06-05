@@ -869,21 +869,31 @@ class SideEffects(
         dispatch(AppIntent.LogMessage("Requesting re-analysis for ${targets.size} file(s)..."))
 
         for (entry in targets) {
-            val hash = entry.sha256Hash ?: entry.md5Hash ?: continue
+            val md5 = entry.md5Hash
+            var sha256 = entry.sha256Hash
             try {
+                // VT's reanalyse endpoint requires SHA-256. If we only have MD5 (e.g. from cache),
+                // look up the file first to get its SHA-256, then request reanalysis.
+                if (sha256 == null && md5 != null) {
+                    withContext(Dispatchers.IO) {
+                        val report = api.checkFileOnVirusTotal(md5)
+                        sha256 = report?.let { VTResponseParser.extractSha256(it) }
+                    }
+                }
+                val hash = sha256 ?: md5 ?: continue
                 withContext(Dispatchers.IO) {
                     api.requestReanalysis(hash)
                 }
                 container.pendingRecheckTracker.addPending(
                     entry.path,
-                    entry.md5Hash ?: "",
+                    md5 ?: "",
                     entry.lastAnalysisDate?.let { parseDateToEpochSeconds(it) }
                 )
                 dispatch(AppIntent.FileProcessed(entry.path, entry.copy(
                     status = FileStatus.QUEUED_FOR_RECHECK
                 )))
             } catch (e: Exception) {
-                dispatch(AppIntent.LogMessage("  Error requesting recheck for ${entry.fileName}: ${e.message}"))
+                dispatch(AppIntent.LogMessage("  Error requesting recheck for ${entry.fileName} (hash=${sha256 ?: md5}): ${e.message}"))
             }
         }
 
