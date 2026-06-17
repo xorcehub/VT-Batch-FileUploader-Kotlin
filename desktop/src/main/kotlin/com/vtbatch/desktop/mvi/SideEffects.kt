@@ -36,7 +36,7 @@ class SideEffects(
     private val dispatch: (AppIntent) -> Unit,
     private val scope: CoroutineScope
 ) {
-    private val scanner = FileScanner()
+    private var scanner = FileScanner()
     private var scanJob: Job? = null
     private var processJob: Job? = null
     private var uploadJob: Job? = null
@@ -1063,7 +1063,8 @@ class SideEffects(
         try {
             val validated = InputValidator.validateExtension(ext, container.config)
             ExtensionsConfig.addExtension(validated)
-            dispatch(AppIntent.LogMessage("Added extension $validated to scan config."))
+            scanner = scanner.reloadExtensions() // pick up the change without a restart
+            dispatch(AppIntent.LogMessage("Added extension $validated to scan config (live)."))
         } catch (e: Exception) {
             dispatch(AppIntent.Error(container.errorHandler.handle(e)))
         }
@@ -1073,7 +1074,8 @@ class SideEffects(
         try {
             val validated = InputValidator.validateExtension(ext, container.config)
             ExtensionsConfig.removeExtension(validated)
-            dispatch(AppIntent.LogMessage("Removed extension $validated from scan config."))
+            scanner = scanner.reloadExtensions() // pick up the change without a restart
+            dispatch(AppIntent.LogMessage("Removed extension $validated from scan config (live)."))
         } catch (e: Exception) {
             dispatch(AppIntent.Error(container.errorHandler.handle(e)))
         }

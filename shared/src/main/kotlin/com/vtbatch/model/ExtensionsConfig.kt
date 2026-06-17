@@ -78,10 +78,15 @@ object ExtensionsConfig {
         }
     }
 
-    /** Load extensions: defaults + JSON + env var */
+    /** Load extensions: JSON config file (the single source of truth) + env var override.
+     *
+     *  The file is seeded with DEFAULT_EXTENSIONS on first run (see loadJsonExtensions);
+     *  after that it is the truth — add-ext/remove-ext edit it directly. The in-code
+     *  DEFAULT_EXTENSIONS constant is NOT merged back in at scan time, so removing a
+     *  default (e.g. .cab) actually takes effect. The env var is an additive override
+     *  on top of whatever the file says. */
     fun getSuspiciousExtensions(): Set<String> {
-        val exts = DEFAULT_EXTENSIONS.toMutableSet()
-        loadJsonExtensions().let { exts.addAll(it) }
+        val exts = loadJsonExtensions().toMutableSet()
 
         // Env var override: VT_SUSPICIOUS_EXTENSIONS=.exe,.dll,.ps1
         System.getenv("VT_SUSPICIOUS_EXTENSIONS")?.let { env ->
@@ -103,12 +108,15 @@ object ExtensionsConfig {
         }
     }
 
-    /** Remove an extension from the JSON config file */
+    /** Remove an extension from the JSON config file. No-op (with a log line) if the
+     *  extension is not currently configured, so the caller isn't left guessing. */
     fun removeExtension(ext: String) {
         val normalized = if (ext.startsWith(".")) ext else ".$ext"
         val current = loadJsonExtensions().toMutableList()
         if (current.remove(normalized)) {
             saveJsonExtensions(current)
+        } else {
+            logger.info { "Extension $normalized is not in the configured scan list; nothing to remove." }
         }
     }
 

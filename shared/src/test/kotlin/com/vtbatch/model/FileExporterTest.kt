@@ -38,7 +38,7 @@ class FileExporterTest {
         reputation = -3,
         firstSubmissionDate = "2025-01-01 00:00",
         lastSubmissionDate = "2026-06-01 12:00",
-        totalVotes = 1 to 4,
+        totalVotes = Votes(1, 4),
         errorMessage = null,
         engineHits = hits
     )

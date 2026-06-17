@@ -37,7 +37,9 @@ class QuotaManager(
         }
     }
     private val cacheDuration = Duration.ofHours(config.cacheDurationHours.toLong())
-    private val json = Json { ignoreUnknownKeys = true }
+    // prettyPrint keeps vt_scan_data.json human-readable for manual inspection;
+    // the file is re-encoded wholesale on every write, so it stays consistently formatted.
+    private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
     private val writeMutex = Mutex()
 
     @Serializable

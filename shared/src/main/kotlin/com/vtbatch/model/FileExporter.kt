@@ -95,8 +95,8 @@ object FileExporter {
             reputation = entry.reputation,
             firstSubmissionDate = entry.firstSubmissionDate,
             lastSubmissionDate = entry.lastSubmissionDate,
-            totalVotesHarmless = entry.totalVotes?.first,
-            totalVotesMalicious = entry.totalVotes?.second,
+            totalVotesHarmless = entry.totalVotes?.harmless,
+            totalVotesMalicious = entry.totalVotes?.malicious,
             errorMessage = entry.errorMessage,
             avDetections = entry.engineHits?.map { ExportDetection(it.engine, it.verdict) }
         )

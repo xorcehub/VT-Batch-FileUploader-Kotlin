@@ -31,4 +31,4 @@ local.properties
 
 /docs/
 desktop/suspicious_extensions.json
-desktop/vt_scan_data.json
+desktop/*.json
