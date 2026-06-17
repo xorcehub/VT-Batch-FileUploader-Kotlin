@@ -9,8 +9,10 @@ import androidx.compose.ui.window.rememberWindowState
 import com.vtbatch.desktop.mvi.AppStore
 import com.vtbatch.desktop.mvi.AppIntent
 import com.vtbatch.desktop.ui.App
+import com.vtbatch.model.AppConfig
 import com.vtbatch.model.CrashLogger
 import com.vtbatch.model.LocalTelemetry
+import com.vtbatch.model.SettingsStore
 import java.awt.Canvas
 import java.awt.Component
 import java.awt.Container
@@ -43,8 +45,13 @@ fun main() = application {
     // ── Credentials ──────────────────────────────────────────────────
     val envApiKey = System.getenv("VT_API_KEY")
 
+    // ── Settings ────────────────────────────────────────────────────
+    val settingsStore = remember { SettingsStore() }
+    val persistedSettings = remember { settingsStore.load() }
+    val (resolvedConfig, overriddenFields) = remember { AppConfig.resolve(persistedSettings) }
+
     // ── Main UI ─────────────────────────────────────────────────────
-    val store = remember { AppStore(apiKey = envApiKey) }
+    val store = remember { AppStore(apiKey = envApiKey, initialConfig = resolvedConfig) }
 
     // Auto-prompt for credentials if no env vars set
     LaunchedEffect(Unit) {

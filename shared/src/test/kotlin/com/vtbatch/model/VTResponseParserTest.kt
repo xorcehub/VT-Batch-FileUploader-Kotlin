@@ -187,6 +187,54 @@ class VTResponseParserTest {
         assertNull(VTResponseParser.extractLastAnalysisDate(jsonObj))
     }
 
+    @Test
+    fun `extractEngineHitsFromAnalysis reads per-engine results`() {
+        val response = """
+        {
+            "data": {
+                "attributes": {
+                    "results": {
+                        "Kaspersky": {"engine_name": "Kaspersky", "category": "malicious", "result": "Trojan.Win32.Generic"},
+                        "Microsoft": {"engine_name": "Microsoft", "category": "malicious", "result": "Trojan:Win32/Wacatac"},
+                        "CleanAV": {"engine_name": "CleanAV", "category": "harmless", "result": null}
+                    }
+                }
+            }
+        }
+        """.trimIndent()
+        val jsonObj = json.parseToJsonElement(response) as JsonObject
+        val hits = VTResponseParser.extractEngineHitsFromAnalysis(jsonObj)
+        assertNotNull(hits)
+        assertEquals(2, hits.size)
+        assertEquals("Kaspersky", hits[0].engine)
+        assertEquals("Trojan.Win32.Generic", hits[0].verdict)
+        assertEquals("Microsoft", hits[1].engine)
+    }
+
+    @Test
+    fun `extractEngineHitsFromAnalysis returns null when no malicious hits`() {
+        val response = """
+        {
+            "data": {
+                "attributes": {
+                    "results": {
+                        "CleanAV": {"engine_name": "CleanAV", "category": "harmless", "result": null}
+                    }
+                }
+            }
+        }
+        """.trimIndent()
+        val jsonObj = json.parseToJsonElement(response) as JsonObject
+        assertNull(VTResponseParser.extractEngineHitsFromAnalysis(jsonObj))
+    }
+
+    @Test
+    fun `extractEngineHitsFromAnalysis returns null when results missing`() {
+        val response = """{"data": {"attributes": {}}}"""
+        val jsonObj = json.parseToJsonElement(response) as JsonObject
+        assertNull(VTResponseParser.extractEngineHitsFromAnalysis(jsonObj))
+    }
+
     // === extractFileDetails ===
 
     @Test
@@ -198,6 +246,23 @@ class VTResponseParserTest {
                     "last_analysis_stats": {
                         "malicious": 5, "suspicious": 2, "undetected": 60,
                         "harmless": 10, "timeout": 1
+                    },
+                    "last_analysis_results": {
+                        "Kaspersky": {
+                            "engine_name": "Kaspersky",
+                            "category": "malicious",
+                            "result": "Trojan.Win32.Generic"
+                        },
+                        "Microsoft": {
+                            "engine_name": "Microsoft",
+                            "category": "malicious",
+                            "result": "Trojan:Win32/Wacatac"
+                        },
+                        "CleanAV": {
+                            "engine_name": "CleanAV",
+                            "category": "harmless",
+                            "result": null
+                        }
                     },
                     "popular_threat_classification": {
                         "suggested_threat_label": "trojan"
@@ -228,6 +293,13 @@ class VTResponseParserTest {
         assertEquals(3, details.totalVotesHarmless)
         assertEquals(7, details.totalVotesMalicious)
         assertEquals("trojan", details.suggestedThreatLabel)
+        // Per-engine detections: only malicious engines, sorted by name
+        val hits = details.engineHits
+        assertNotNull(hits)
+        assertEquals(2, hits.size)
+        assertEquals("Kaspersky", hits[0].engine)
+        assertEquals("Trojan.Win32.Generic", hits[0].verdict)
+        assertEquals("Microsoft", hits[1].engine)
     }
 
     @Test
@@ -235,6 +307,25 @@ class VTResponseParserTest {
         val response = """{"data": {}}"""
         val jsonObj = json.parseToJsonElement(response) as JsonObject
         assertNull(VTResponseParser.extractFileDetails(jsonObj))
+    }
+
+    @Test
+    fun `extractFileDetails returns empty engineHits when nothing is malicious`() {
+        val response = """
+        {
+            "data": {
+                "attributes": {
+                    "last_analysis_results": {
+                        "CleanAV": {"engine_name": "CleanAV", "category": "harmless", "result": null}
+                    }
+                }
+            }
+        }
+        """.trimIndent()
+        val jsonObj = json.parseToJsonElement(response) as JsonObject
+        val details = VTResponseParser.extractFileDetails(jsonObj)
+        assertNotNull(details)
+        assertNull(details.engineHits) // no malicious engines -> null (not empty list)
     }
 
     @Test

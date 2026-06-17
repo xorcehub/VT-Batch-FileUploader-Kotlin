@@ -4,6 +4,8 @@ import com.vtbatch.model.*
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.*
 import java.awt.Desktop
+import java.awt.FileDialog
+import java.awt.Frame
 import java.io.File
 import java.net.URI
 import java.time.Instant
@@ -34,7 +36,7 @@ class SideEffects(
     private val dispatch: (AppIntent) -> Unit,
     private val scope: CoroutineScope
 ) {
-    private val scanner = FileScanner()
+    private var scanner = FileScanner()
     private var scanJob: Job? = null
     private var processJob: Job? = null
     private var uploadJob: Job? = null
@@ -63,8 +65,7 @@ class SideEffects(
         scanJob?.cancel()
         processJob?.cancel()
         uploadJob?.cancel()
-        container.pendingRecheckTracker.stopTimer()
-        container.pendingRecheckTracker.clearAll()
+        container.pendingRecheckTracker.close()
     }
 
     fun scanFiles(paths: List<String>) {
@@ -123,13 +124,15 @@ class SideEffects(
                     if (cached != null) {
                         cachedCount++
                         container.telemetry.recordCacheHit()
+                        val cachedStatus = if (cached.status == "HASHED_NOT_FOUND")
+                            FileStatus.HASHED_NOT_FOUND else FileStatus.HASHED_FOUND
                         files.add(FileEntry(
                             path = filePath,
                             fileName = file.name,
                             fileSizeBytes = sizeBytes,
                             fileSizeFormatted = sizeFormatted,
                             md5Hash = md5,
-                            status = FileStatus.HASHED_FOUND,
+                            status = cachedStatus,
                             analysisUrl = cached.url,
                             detectionRatio = cached.detections,
                             lastAnalysisDate = cached.lastAnalysisDate?.let { formatTimestamp(it) },
@@ -143,8 +146,9 @@ class SideEffects(
                             firstSubmissionDate = cached.firstSubmissionDate?.let { formatTimestamp(it) },
                             lastSubmissionDate = cached.lastSubmissionDate?.let { formatTimestamp(it) },
                             totalVotes = cached.totalVotesHarmless?.let { h ->
-                                cached.totalVotesMalicious?.let { m -> Pair(h, m) }
-                            }
+                                cached.totalVotesMalicious?.let { m -> Votes(h, m) }
+                            },
+                            engineHits = cached.engineHits
                         ))
                     } else {
                         newCount++
@@ -163,10 +167,10 @@ class SideEffects(
                     totalBytesHashed += sizeBytes
                     val pct = (index + 1).toFloat() / allSuspicious.size
                     val elapsed = (System.currentTimeMillis() - startTime).toFloat() / 1000f
-                    val speedMbps = if (elapsed > 0) (totalBytesHashed / (1024.0 * 1024.0)) / elapsed else 0.0
+                    val speedMBps = if (elapsed > 0) (totalBytesHashed / (1024.0 * 1024.0)) / elapsed else 0.0
                     dispatch(AppIntent.HashingProgress(
                         percent = pct,
-                        speedMbps = speedMbps.toFloat(),
+                        speedMBps = speedMBps.toFloat(),
                         fileCount = index + 1,
                         elapsedFormatted = String.format("%.1fs", elapsed)
                     ))
@@ -183,8 +187,22 @@ class SideEffects(
                 container.telemetry.recordFilesScanned(files.size)
                 dispatch(AppIntent.FilesScanned(files, summary))
 
-                // Auto-refresh stale cache entries in background so scan returns immediately
-                val stale = files.filter { it.detectionRatio == null && it.md5Hash != null }
+                // Auto-refresh stale cache entries in background so scan returns immediately.
+                // Only refresh entries older than the configured cache TTL.
+                // Recent entries without detection ratio were likely from uploads still
+                // being analyzed — no point re-checking them immediately and burning quota.
+                val staleThreshold = java.time.LocalDateTime.now().minusHours(container.config.cacheDurationHours.toLong())
+                val stale = files.filter { entry ->
+                    entry.detectionRatio == null && entry.md5Hash != null
+                }.filter { entry ->
+                    val cached = cache[entry.md5Hash]
+                    // Only refresh if cache entry is older than the configured TTL
+                    cached != null && try {
+                        java.time.LocalDateTime.parse(cached.lastScan) < staleThreshold
+                    } catch (_: Exception) {
+                        true // unparseable timestamp → treat as stale
+                    }
+                }
                 if (stale.isNotEmpty() && container.virusTotalApi != null) {
                     scope.launch { refreshStaleEntries(stale) }
                 }
@@ -250,6 +268,19 @@ class SideEffects(
                 it.status == FileStatus.PENDING && it.md5Hash != null
             }
 
+            // Mark files that failed hashing as ERROR (md5Hash == null)
+            val hashFailed = files.filter {
+                it.status == FileStatus.PENDING && it.md5Hash == null
+            }
+            if (hashFailed.isNotEmpty()) {
+                val failedUpdates = hashFailed.map { it.copy(
+                    status = FileStatus.HASH_FAILED,
+                    errorMessage = "Failed to compute file hash"
+                ) }
+                dispatch(AppIntent.FilesUpdated(failedUpdates))
+                logger.warn { "${hashFailed.size} files skipped due to failed hashing" }
+            }
+
             if (toProcess.isEmpty()) {
                 dispatch(AppIntent.ProcessingCompleted)
                 return@launch
@@ -298,7 +329,16 @@ class SideEffects(
                             lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
                         ).withDetails(details)
                     } else {
-                        // Not found on VT
+                        // Not found on VT — cache this so we don't burn quota re-checking
+                        withContext(Dispatchers.IO) {
+                            container.quotaManager.saveEntry(entry.md5Hash!!, QuotaManager.CacheEntry(
+                                filename = entry.fileName,
+                                size = entry.fileSizeBytes,
+                                path = entry.path,
+                                lastScan = java.time.LocalDateTime.now().toString(),
+                                status = "HASHED_NOT_FOUND"
+                            ))
+                        }
                         entry.copy(status = FileStatus.HASHED_NOT_FOUND)
                     }
 
@@ -323,16 +363,16 @@ class SideEffects(
                 totalBytesProcessed += entry.fileSizeBytes
                 val pct = processed.toFloat() / toProcess.size
                 val elapsed = (System.currentTimeMillis() - startTime) / 1000f
-                val speedMbps = if (elapsed > 0) (totalBytesProcessed / (1024.0 * 1024.0)) / elapsed else 0.0
+                val speedMBps = if (elapsed > 0) (totalBytesProcessed / (1024.0 * 1024.0)) / elapsed else 0.0
                 dispatch(AppIntent.TotalProgress(
                     percent = pct,
-                    speedFormatted = "%.1f MB/s".format(speedMbps),
+                    speedFormatted = "%.1f MB/s".format(speedMBps),
                     fileCount = processed,
                     elapsedFormatted = String.format("%.1fs", elapsed)
                 ))
                 dispatch(AppIntent.HashingProgress(
                     percent = pct,
-                    speedMbps = speedMbps.toFloat(),
+                    speedMBps = speedMBps.toFloat(),
                     fileCount = processed,
                     elapsedFormatted = String.format("%.1fs", elapsed)
                 ))
@@ -399,12 +439,12 @@ class SideEffects(
                             if (now - lastProgressTime >= 200) {
                                 val deltaTime = (now - lastProgressTime) / 1000f
                                 val deltaBytes = bytesSent - lastProgressBytes
-                                val speedMbps = if (deltaTime > 0) (deltaBytes / (1024.0 * 1024.0)) / deltaTime else 0.0
+                                val speedMBps = if (deltaTime > 0) (deltaBytes / (1024.0 * 1024.0)) / deltaTime else 0.0
                                 val totalElapsed = (now - fileStartTime) / 1000f
 
                                 dispatch(AppIntent.UploadSpeed(
                                     percent = percent,
-                                    speedMbps = speedMbps.toFloat(),
+                                    speedMBps = speedMBps.toFloat(),
                                     fileCount = uploaded + 1,
                                     elapsedFormatted = String.format("%.1fs", totalElapsed)
                                 ))
@@ -449,16 +489,16 @@ class SideEffects(
                 uploaded++
                 totalBytesUploaded += entry.fileSizeBytes
                 val elapsed = (System.currentTimeMillis() - uploadStartTime) / 1000f
-                val speedMbps = if (elapsed > 0) (totalBytesUploaded / (1024.0 * 1024.0)) / elapsed else 0.0
+                val speedMBps = if (elapsed > 0) (totalBytesUploaded / (1024.0 * 1024.0)) / elapsed else 0.0
                 dispatch(AppIntent.TotalProgress(
                     percent = uploaded.toFloat() / toUpload.size,
-                    speedFormatted = "%.1f MB/s".format(speedMbps),
+                    speedFormatted = "%.1f MB/s".format(speedMBps),
                     fileCount = uploaded,
                     elapsedFormatted = String.format("%.1fs", elapsed)
                 ))
                 dispatch(AppIntent.UploadSpeed(
                     percent = uploaded.toFloat() / toUpload.size,
-                    speedMbps = speedMbps.toFloat(),
+                    speedMBps = speedMBps.toFloat(),
                     fileCount = uploaded,
                     elapsedFormatted = String.format("%.1fs", elapsed)
                 ))
@@ -470,87 +510,86 @@ class SideEffects(
             //  PHASE 2: Poll all uploaded files for analysis results
             // ═══════════════════════════════════════════════════════════
             if (pendingAnalysis.isNotEmpty()) {
+                dispatch(AppIntent.LogMessage("Phase 2: Waiting ${container.config.analysisInitialDelay}s for VT to process ${pendingAnalysis.size} file(s)..."))
+                delay(container.config.analysisInitialDelay * 1000L)
+
                 dispatch(AppIntent.LogMessage("Phase 2: Polling analysis for ${pendingAnalysis.size} file(s)..."))
-                var polled = 0
-                for ((entry, analysisId) in pendingAnalysis) {
-                    container.pauseController.waitIfPaused()
-                    polled++
-                    dispatch(AppIntent.CurrentProcessingChanged(
-                        File(entry.path).name,
-                        "Polling analysis ($polled/${pendingAnalysis.size})..."
-                    ))
-                    pollAnalysis(entry, analysisId, api)
+
+                // Round-robin polling: poll all files, then re-poll unfinished ones
+                val remaining = pendingAnalysis.toMutableList()
+                var round = 0
+                val maxRounds = container.config.analysisMaxRetries
+
+                while (remaining.isNotEmpty() && round < maxRounds) {
+                    round++
+                    val iterator = remaining.iterator()
+                    while (iterator.hasNext()) {
+                        container.pauseController.waitIfPaused()
+                        val (entry, analysisId) = iterator.next()
+                        val fileName = File(entry.path).name
+                        dispatch(AppIntent.CurrentProcessingChanged(
+                            fileName,
+                            "Polling round $round ($maxRounds max)..."
+                        ))
+
+                        try {
+                            val result = withContext(Dispatchers.IO) {
+                                api.getAnalysisResults(analysisId)
+                            }
+
+                            if (result != null) {
+                                val status = VTResponseParser.extractAnalysisStatus(result)
+                                if (status == "completed") {
+                                    val ratio = VTResponseParser.extractDetectionStatsFromAnalysis(result)
+                                    val sha256 = VTResponseParser.extractSha256FromAnalysis(result)
+                                    // Per-engine hits come straight from the analysis
+                                    // response's `results` map — no extra call needed.
+                                    val engineHits = VTResponseParser.extractEngineHitsFromAnalysis(result)
+                                    val lastDate = System.currentTimeMillis() / 1000
+                                    val detectionStats = ratio?.let { VTResponseParser.DetectionStats(it, it) }
+
+                                    val updatedEntry = entry.copy(
+                                        sha256Hash = sha256,
+                                        status = FileStatus.ANALYSIS_COMPLETE,
+                                        analysisUrl = sha256?.let { "${VT_FILE_URL}$it" },
+                                        detectionRatio = ratio,
+                                        lastAnalysisDate = formatTimestamp(lastDate),
+                                        engineHits = engineHits
+                                    )
+
+                                    // status="completed" marks freshly-uploaded files;
+                                    // engineHits persist so a re-drop restores them.
+                                    container.quotaManager.saveEntry(
+                                        entry.md5Hash ?: "",
+                                        buildCacheEntry(entry, sha256, lastDate, detectionStats, null)
+                                            .copy(status = "completed", engineHits = engineHits)
+                                    )
+
+                                    dispatch(AppIntent.AnalysisCompleted(entry.path, updatedEntry))
+                                    iterator.remove()
+                                }
+                            }
+                        } catch (e: Exception) {
+                            logger.warn { "Analysis poll error for $fileName: ${e.message}" }
+                        }
+                    }
+
+                    // Wait between rounds (not after the last one)
+                    if (remaining.isNotEmpty() && round < maxRounds) {
+                        dispatch(AppIntent.CurrentProcessingChanged(null, "Waiting ${container.config.analysisPollInterval}s for next round..."))
+                        delay(container.config.analysisPollInterval * 1000L)
+                    }
+                }
+
+                // Timeout any files that didn't complete
+                for ((entry, _) in remaining) {
+                    dispatch(AppIntent.AnalysisTimeout(entry.path))
                 }
             }
 
             dispatch(AppIntent.CurrentProcessingChanged(null, null))
             dispatch(AppIntent.UploadCompleted)
         }
-    }
-
-    /** Poll VT for analysis results after upload */
-    private suspend fun pollAnalysis(
-        entry: FileEntry,
-        analysisId: String,
-        api: VirusTotalApi,
-        maxRetries: Int = container.config.analysisMaxRetries
-    ) {
-        val fileName = File(entry.path).name
-        dispatch(AppIntent.LogMessage("  Waiting for analysis of $fileName..."))
-        delay(container.config.analysisInitialDelay * 1000L)
-
-        for (attempt in 1..maxRetries) {
-            container.pauseController.waitIfPaused()
-
-            dispatch(AppIntent.CurrentProcessingChanged(fileName, "Polling analysis ($attempt/$maxRetries)..."))
-
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    api.getAnalysisResults(analysisId)
-                }
-
-                if (result != null) {
-                    val status = VTResponseParser.extractAnalysisStatus(result)
-                    if (status == "completed") {
-                        val stats = VTResponseParser.extractDetectionStatsFromAnalysis(result)
-                        val sha256 = VTResponseParser.extractSha256FromAnalysis(result)
-                        val lastDate = System.currentTimeMillis() / 1000
-
-                        val updatedEntry = entry.copy(
-                            sha256Hash = sha256,
-                            status = FileStatus.ANALYSIS_COMPLETE,
-                            analysisUrl = sha256?.let { "${VT_FILE_URL}$it" },
-                            detectionRatio = stats,
-                            lastAnalysisDate = formatTimestamp(lastDate)
-                        )
-
-                        // Cache the analysis result for future scans
-                        container.quotaManager.saveEntry(entry.md5Hash ?: "", QuotaManager.CacheEntry(
-                            filename = fileName,
-                            size = entry.fileSizeBytes,
-                            path = entry.path,
-                            url = updatedEntry.analysisUrl,
-                            lastScan = java.time.LocalDateTime.now().toString(),
-                            status = "completed",
-                            lastAnalysisDate = lastDate,
-                            detections = stats
-                        ))
-
-                        dispatch(AppIntent.AnalysisCompleted(entry.path, updatedEntry))
-                        return
-                    }
-                }
-            } catch (e: Exception) {
-                logger.warn { "Analysis poll error for $fileName: ${e.message}" }
-            }
-
-            if (attempt < maxRetries) {
-                dispatch(AppIntent.CurrentProcessingChanged(fileName, "Waiting for analysis..."))
-                delay(container.config.analysisPollInterval * 1000L)
-            }
-        }
-
-        dispatch(AppIntent.AnalysisTimeout(entry.path))
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -572,6 +611,12 @@ class SideEffects(
                 } else {
                     dispatch(AppIntent.CredentialsInvalid("Invalid API key. Check your credentials."))
                 }
+            } catch (e: java.net.ConnectException) {
+                dispatch(AppIntent.CredentialsInvalid("Cannot reach VirusTotal servers. Check your internet connection."))
+            } catch (e: java.net.SocketTimeoutException) {
+                dispatch(AppIntent.CredentialsInvalid("Connection timed out. VirusTotal servers may be down or your network is unreachable."))
+            } catch (e: java.net.UnknownHostException) {
+                dispatch(AppIntent.CredentialsInvalid("Cannot resolve VirusTotal hostname. Check your internet connection."))
             } catch (e: Exception) {
                 dispatch(AppIntent.CredentialsInvalid("Validation failed: ${e.message}"))
             }
@@ -593,7 +638,7 @@ class SideEffects(
         scope.launch {
             try {
                 val info = withContext(Dispatchers.IO) {
-                    getUserInfo(apiKey, apiKey, container.config)
+                    getUserInfo(apiKey, apiKey, container.config, sharedClient = container.virusTotalApi?.sharedClient)
                 }
 
                 val quotas = info?.data?.attributes?.quotas
@@ -650,6 +695,53 @@ class SideEffects(
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    //  EXPORT TO JSON
+    // ═══════════════════════════════════════════════════════════════════
+
+    /** Export the current file list (with all VT data + per-engine detections) to JSON. */
+    fun exportFiles(files: List<FileEntry>) {
+        scope.launch {
+            if (files.isEmpty()) {
+                dispatch(AppIntent.LogMessage("No files to export."))
+                return@launch
+            }
+
+            val target = withContext(Dispatchers.IO) { pickExportFile() }
+            if (target == null) {
+                dispatch(AppIntent.LogMessage("Export cancelled."))
+                return@launch
+            }
+
+            try {
+                val content = withContext(Dispatchers.IO) { FileExporter.toJson(files) }
+                withContext(Dispatchers.IO) { target.writeText(content) }
+                dispatch(AppIntent.LogMessage("Exported ${files.size} file(s) to ${target.absolutePath}."))
+            } catch (e: Exception) {
+                val msg = container.errorHandler.handle(e)
+                dispatch(AppIntent.Error("Export failed: $msg"))
+            }
+        }
+    }
+
+    /**
+     * Show a native "Save As" dialog and return the chosen file.
+     * Returns null if the user cancelled. Ensures a .json extension.
+     */
+    // Compose Desktop renders on an AWT window we don't have a direct handle to
+    // from here, so we grab the first heavyweight Frame as the dialog parent.
+    private fun pickExportFile(): File? {
+        val frame = Frame.getWindows().filterIsInstance<Frame>().firstOrNull()
+        val dialog = FileDialog(frame, "Export to JSON", FileDialog.SAVE)
+        dialog.file = "vtbatch-export.json"
+        dialog.isVisible = true   // modal — blocks until the user picks or cancels
+
+        val dir = dialog.directory ?: return null
+        val name = dialog.file ?: return null
+        val finalName = if (name.endsWith(".json", ignoreCase = true)) name else "$name.json"
+        return File(dir, finalName)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     //  COMMANDS
     // ═══════════════════════════════════════════════════════════════════
 
@@ -679,7 +771,8 @@ class SideEffects(
                 trimmed.equals("update-quota", ignoreCase = true) -> fetchQuota()
                 trimmed.equals("open-red", ignoreCase = true) -> openRedFiles(currentFiles)
                 trimmed.equals("stats", ignoreCase = true) -> showStats()
-                trimmed.equals("api-swap", ignoreCase = true) -> dispatch(AppIntent.LogMessage("api-swap requires .env file support (not yet implemented)."))
+                trimmed.equals("export", ignoreCase = true) -> exportFiles(currentFiles)
+                trimmed.equals("api-swap", ignoreCase = true) -> dispatch(AppIntent.LogMessage("Unknown command. Type 'help' for available commands."))
                 else -> dispatch(AppIntent.LogMessage("Unknown command: $trimmed. Type 'help' for available commands."))
             }
         }
@@ -705,6 +798,11 @@ class SideEffects(
             appendLine("  update-quota      — Refresh API quota display")
             appendLine("  open-red          — Open malicious/suspicious files in browser")
             appendLine("  stats             — Show local usage statistics")
+            appendLine("  export            — Export the current file list to JSON")
+            appendLine()
+            appendLine("Tip: API keys set via VT_API_KEY env var are visible to other users")
+            appendLine("     on shared systems. Prefer the credential dialog (AES-encrypted)")
+            appendLine("     for better security.")
         }
         dispatch(AppIntent.LogMessage(help.trimEnd()))
     }
@@ -825,21 +923,31 @@ class SideEffects(
         dispatch(AppIntent.LogMessage("Requesting re-analysis for ${targets.size} file(s)..."))
 
         for (entry in targets) {
-            val hash = entry.sha256Hash ?: entry.md5Hash ?: continue
+            val md5 = entry.md5Hash
+            var sha256 = entry.sha256Hash
             try {
+                // VT's reanalyse endpoint requires SHA-256. If we only have MD5 (e.g. from cache),
+                // look up the file first to get its SHA-256, then request reanalysis.
+                if (sha256 == null && md5 != null) {
+                    withContext(Dispatchers.IO) {
+                        val report = api.checkFileOnVirusTotal(md5)
+                        sha256 = report?.let { VTResponseParser.extractSha256(it) }
+                    }
+                }
+                val hash = sha256 ?: md5 ?: continue
                 withContext(Dispatchers.IO) {
                     api.requestReanalysis(hash)
                 }
                 container.pendingRecheckTracker.addPending(
                     entry.path,
-                    entry.md5Hash ?: "",
+                    md5 ?: "",
                     entry.lastAnalysisDate?.let { parseDateToEpochSeconds(it) }
                 )
                 dispatch(AppIntent.FileProcessed(entry.path, entry.copy(
                     status = FileStatus.QUEUED_FOR_RECHECK
                 )))
             } catch (e: Exception) {
-                dispatch(AppIntent.LogMessage("  Error requesting recheck for ${entry.fileName}: ${e.message}"))
+                dispatch(AppIntent.LogMessage("  Error requesting recheck for ${entry.fileName} (hash=${sha256 ?: md5}): ${e.message}"))
             }
         }
 
@@ -859,6 +967,17 @@ class SideEffects(
         dispatch(AppIntent.LogMessage("Polling recheck results for ${pending.size} file(s)..."))
 
         for (recheck in pending) {
+            // Mark as actively rechecking so UI shows the correct state
+            val recheckFile = File(recheck.filePath)
+            val recheckingEntry = FileEntry(
+                path = recheck.filePath,
+                fileName = recheckFile.name,
+                fileSizeBytes = if (recheckFile.exists()) recheckFile.length() else 0L,
+                fileSizeFormatted = if (recheckFile.exists()) formatFileSize(recheckFile.length()) else "?",
+                md5Hash = recheck.md5Hash,
+                status = FileStatus.RECHECKING
+            )
+            dispatch(AppIntent.FileProcessed(recheck.filePath, recheckingEntry))
             try {
                 val result = withContext(Dispatchers.IO) {
                     api.checkFileOnVirusTotal(recheck.md5Hash)
@@ -944,7 +1063,8 @@ class SideEffects(
         try {
             val validated = InputValidator.validateExtension(ext, container.config)
             ExtensionsConfig.addExtension(validated)
-            dispatch(AppIntent.LogMessage("Added extension $validated to scan config."))
+            scanner = scanner.reloadExtensions() // pick up the change without a restart
+            dispatch(AppIntent.LogMessage("Added extension $validated to scan config (live)."))
         } catch (e: Exception) {
             dispatch(AppIntent.Error(container.errorHandler.handle(e)))
         }
@@ -954,7 +1074,8 @@ class SideEffects(
         try {
             val validated = InputValidator.validateExtension(ext, container.config)
             ExtensionsConfig.removeExtension(validated)
-            dispatch(AppIntent.LogMessage("Removed extension $validated from scan config."))
+            scanner = scanner.reloadExtensions() // pick up the change without a restart
+            dispatch(AppIntent.LogMessage("Removed extension $validated from scan config (live)."))
         } catch (e: Exception) {
             dispatch(AppIntent.Error(container.errorHandler.handle(e)))
         }
@@ -964,7 +1085,8 @@ class SideEffects(
         val key = container.apiKey
         if (key != null) {
             val masked = key.take(4) + "****" + key.takeLast(4)
-            dispatch(AppIntent.LogMessage("API Key: $masked"))
+            val source = if (System.getenv("VT_API_KEY") != null) "environment variable" else "encrypted file"
+            dispatch(AppIntent.LogMessage("API Key: $masked (source: $source)"))
         } else {
             dispatch(AppIntent.LogMessage("No API key configured. Use the credential dialog or set VT_API_KEY."))
         }
@@ -1031,8 +1153,9 @@ class SideEffects(
             firstSubmissionDate = details.firstSubmissionDate?.let { formatTimestamp(it) },
             lastSubmissionDate = details.lastSubmissionDate?.let { formatTimestamp(it) },
             totalVotes = details.totalVotesHarmless?.let { h ->
-                details.totalVotesMalicious?.let { m -> Pair(h, m) }
-            }
+                details.totalVotesMalicious?.let { m -> Votes(h, m) }
+            },
+            engineHits = details.engineHits
         )
     }
 
@@ -1063,7 +1186,8 @@ class SideEffects(
         firstSubmissionDate = details?.firstSubmissionDate,
         lastSubmissionDate = details?.lastSubmissionDate,
         totalVotesHarmless = details?.totalVotesHarmless,
-        totalVotesMalicious = details?.totalVotesMalicious
+        totalVotesMalicious = details?.totalVotesMalicious,
+        engineHits = details?.engineHits
     )
 
 
@@ -1087,6 +1211,24 @@ class SideEffects(
                 LocalDateTime.parse(dateStr, DateTimeFormatter.ofPattern("yyyy-MM-dd"))
                     .atZone(ZoneId.systemDefault()).toEpochSecond()
             } catch (e2: Exception) { null }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SETTINGS
+    // ═══════════════════════════════════════════════════════════════════
+
+    fun saveSettings(settings: UserSettings) {
+        scope.launch {
+            try {
+                container.settingsStore.save(settings)
+                val (newConfig, overridden) = AppConfig.resolve(settings)
+                container.updateConfig(newConfig)
+                dispatch(AppIntent.SettingsSaved(overridden))
+            } catch (e: Exception) {
+                val msg = container.errorHandler.handle(e)
+                dispatch(AppIntent.SettingsError(msg))
+            }
         }
     }
 }

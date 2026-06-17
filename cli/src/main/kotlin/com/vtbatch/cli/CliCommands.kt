@@ -2,6 +2,7 @@ package com.vtbatch.cli
 
 import com.vtbatch.model.*
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import picocli.CommandLine.Command
 import picocli.CommandLine.Option
@@ -30,6 +31,7 @@ object ExitCodes {
 fun mapExceptionToExitCode(e: Throwable): Int = when (e) {
     is APIRateLimitError -> ExitCodes.RATE_LIMIT
     is APIConnectionError, is APITimeoutError -> ExitCodes.NETWORK_ERROR
+    is java.net.SocketTimeoutException, is java.net.ConnectException, is java.net.UnknownHostException -> ExitCodes.NETWORK_ERROR
     is ConfigurationError -> ExitCodes.AUTH_ERROR
     is VTBatchError -> ExitCodes.ERROR
     else -> ExitCodes.ERROR
@@ -108,9 +110,18 @@ class ScanCommand : Callable<Int> {
     @Option(names = ["--no-recursive"], description = ["Do not recurse into subdirectories"])
     var noRecursive: Boolean = false
 
+    @Option(names = ["--extensions"], description = ["Comma-separated extensions to scan (e.g. .exe,.dll,.bat)"], split = ",")
+    var extensions: List<String>? = null
+
     override fun call(): Int {
         val out = parent.output
-        val scanner = FileScanner()
+        val scanner = if (!extensions.isNullOrEmpty()) {
+            val extList = extensions
+            val extSet = extList!!.map { if (it.startsWith(".")) it.lowercase() else ".${it.lowercase()}" }.toSet()
+            FileScanner(extSet)
+        } else {
+            FileScanner()
+        }
 
         val allFiles = mutableListOf<String>()
         for (path in paths) {
@@ -205,7 +216,7 @@ class CheckCommand : Callable<Int> {
                 out.progress("Computing hash for $filePath...")
                 api.calculateMd5(filePath!!)
             } else if (hashValue != null) {
-                hashValue!!
+                InputValidator.validateHash(hashValue!!)
             } else {
                 out.error("check", "Provide --file or --hash", "InputValidationError", ExitCodes.ERROR)
                 return ExitCodes.ERROR
@@ -242,7 +253,7 @@ class CheckCommand : Callable<Int> {
                 )
 
                 // Save to cache
-                cache.saveEntry(hash, QuotaManager.CacheEntry(
+                runBlocking { cache.saveEntry(hash, QuotaManager.CacheEntry(
                     filename = filePath?.let { File(it).name },
                     path = filePath,
                     url = data["analysis_url"] as? String,
@@ -250,7 +261,7 @@ class CheckCommand : Callable<Int> {
                     status = "found",
                     lastAnalysisDate = lastDate,
                     detections = stats?.ratio
-                ))
+                )) }
 
                 out.success("check", data)
                 ExitCodes.SUCCESS
@@ -287,12 +298,24 @@ class UploadCommand : Callable<Int> {
     @Option(names = ["--force", "-f"], description = ["Upload even if file already exists on VT"])
     var force: Boolean = false
 
+    @Option(names = ["--yes", "-y"], description = ["Skip confirmation prompts"])
+    var yes: Boolean = false
+
     override fun call(): Int {
         val out = parent.output
         val (key) = resolveApiKey(parent.apiKey)
         val api = createApi(key, out, "upload") ?: return ExitCodes.AUTH_ERROR
 
         try {
+            // Confirmation prompt for destructive operations
+            if (!yes && force) {
+                print("Force-upload ${files.size} file(s) without checking VT first? [y/N] ")
+                if (readlnOrNull()?.lowercase()?.trim() != "y") {
+                    parent.output.error("upload", "Aborted.")
+                    return 1
+                }
+            }
+
             val results = mutableListOf<Map<String, Any?>>()
             var uploaded = 0
             var skipped = 0
@@ -344,16 +367,21 @@ class UploadCommand : Callable<Int> {
                         val maxWaitMs = timeout * 1000L
 
                         while (System.currentTimeMillis() - startTime < maxWaitMs) {
+                            val elapsed = (System.currentTimeMillis() - startTime) / 1000
+                            print("\r[K  Waiting for analysis... ${elapsed}s elapsed")
+                            System.out.flush()
+
                             val analysis = runBlocking { api.getAnalysisResults(analysisId) }
                             val status = analysis?.let { VTResponseParser.extractAnalysisStatus(it) }
 
                             if (status == "completed") {
+                                println(" done.")
                                 val stats = analysis?.let { VTResponseParser.extractDetectionStatsFromAnalysis(it) }
                                 entry["status"] = "completed"
                                 entry["last_analysis_stats"] = stats
                                 break
                             }
-                            Thread.sleep(10000) // poll every 10s
+                            runBlocking { delay(10000L) } // poll every 10s
                         }
 
                         if (entry["status"] == "uploaded") {
@@ -544,9 +572,24 @@ class CacheGetCommand : Callable<Int> {
 class CacheClearCommand : Callable<Int> {
     @ParentCommand lateinit var parent: CacheCommand
 
+    @Option(names = ["--yes", "-y"], description = ["Skip confirmation prompt"])
+    var yes: Boolean = false
+
     override fun call(): Int {
         val out = parent.parent.output
-        parent.cache.clearCache()
+        if (!yes) {
+            print("Clear all cached scan results? [y/N] ")
+            if (readlnOrNull()?.lowercase()?.trim() != "y") {
+                out.error("cache clear", "Aborted.")
+                return 1
+            }
+        }
+        try {
+            runBlocking { parent.cache.clearCache() }
+        } catch (e: CacheError) {
+            out.error("cache clear", e.message ?: "Cache write failed")
+            return ExitCodes.ERROR
+        }
         out.success("cache clear", mapOf("cleared" to true))
         return ExitCodes.SUCCESS
     }

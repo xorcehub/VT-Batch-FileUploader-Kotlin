@@ -6,7 +6,7 @@ import kotlin.test.assertTrue
 
 class ErrorHandlerTest {
 
-    private val handler = ErrorHandler()
+    private val handler = ErrorHandler
 
     // ═══════════════════════════════════════════════════════════════════
     //  APIRateLimitError

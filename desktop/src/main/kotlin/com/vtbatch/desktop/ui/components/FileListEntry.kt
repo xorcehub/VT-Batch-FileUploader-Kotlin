@@ -106,8 +106,7 @@ fun FileListEntry(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        if (file.md5Hash != null) {
-                            val hash: String = file.md5Hash!!
+                        file.md5Hash?.let { hash ->
                             Text(
                                 text = "  |  Hash: ${hash.take(16)}...",
                                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
@@ -168,61 +167,83 @@ fun FileListEntry(
 @Composable
 private fun FileDetailPanel(file: FileEntry, accentColor: androidx.compose.ui.graphics.Color) {
     val dimText = MaterialTheme.colorScheme.onSurfaceVariant
-    val bodySmall = MaterialTheme.typography.bodySmall
 
-    HorizontalDivider(
-        modifier = Modifier.padding(horizontal = 12.dp),
-        color = MaterialTheme.colorScheme.outlineVariant
-    )
+    // One wrapping Column so every section stacks vertically. Without it,
+    // Compose places un-parented siblings at the same origin and they paint
+    // over each other (the overlay bug).
+    Column(modifier = Modifier.fillMaxWidth()) {
+        HorizontalDivider(
+            modifier = Modifier.padding(horizontal = 12.dp),
+            color = MaterialTheme.colorScheme.outlineVariant
+        )
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(24.dp)
-    ) {
-        // ── Column 1: Threat Analysis ─────────────────────────────
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            SectionHeader("Threat Analysis")
-            file.popularThreatLabel?.let { label ->
-                val labelColor = threatLabelColor(label)
-                DetailRow("Threat Label", label, valueColor = labelColor)
-            }
-            file.detectionRatio?.let { DetailRow("Detections", it, valueColor = accentColor) }
-            file.lastAnalysisStats?.let { DetailRow("Engine Stats", it) }
-            file.lastAnalysisDate?.let { DetailRow("Last Analysis", it) }
-        }
-
-        // ── Column 2: File Identity ──────────────────────────────
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            SectionHeader("File Identity")
-            file.typeDescription?.let { DetailRow("File Type", it) }
-            file.meaningfulName?.let { DetailRow("Name", it) }
-            file.sha256Hash?.let { hash ->
-                DetailRow("SHA256", hash.take(16) + "...", fontFamily = FontFamily.Monospace)
-            }
-            file.tags?.takeIf { it.isNotEmpty() }?.let { tags ->
-                DetailRow("Tags", tags.take(5).joinToString(", ") + if (tags.size > 5) " +" else "")
-            }
-        }
-
-        // ── Column 3: Community ──────────────────────────────────
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            SectionHeader("Community")
-            file.reputation?.let { rep ->
-                val sign = if (rep >= 0) "+" else ""
-                val repColor = when {
-                    rep > 0 -> AppColors.CleanGreen
-                    rep < 0 -> AppColors.MaliciousRed
-                    else -> dimText
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            // ── Column 1: Threat Analysis ─────────────────────────────
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                SectionHeader("Threat Analysis")
+                file.popularThreatLabel?.let { label ->
+                    val labelColor = threatLabelColor(label)
+                    DetailRow("Threat Label", label, valueColor = labelColor)
                 }
-                DetailRow("Reputation", "$sign$rep", valueColor = repColor)
+                file.detectionRatio?.let { DetailRow("Detections", it, valueColor = accentColor) }
+                file.lastAnalysisStats?.let { DetailRow("Engine Stats", it) }
+                file.lastAnalysisDate?.let { DetailRow("Last Analysis", it) }
             }
-            file.totalVotes?.let { (harmless, malicious) ->
-                DetailRow("Votes", "$harmless harmless / $malicious malicious")
+
+            // ── Column 2: File Identity ──────────────────────────────
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                SectionHeader("File Identity")
+                file.typeDescription?.let { DetailRow("File Type", it) }
+                file.meaningfulName?.let { DetailRow("Name", it) }
+                file.sha256Hash?.let { hash ->
+                    DetailRow("SHA256", hash.take(16) + "...", fontFamily = FontFamily.Monospace)
+                }
+                file.tags?.takeIf { it.isNotEmpty() }?.let { tags ->
+                    DetailRow("Tags", tags.take(5).joinToString(", ") + if (tags.size > 5) " +" else "")
+                }
             }
-            file.timesSubmitted?.let { DetailRow("Submitted", "${it}x") }
-            file.firstSubmissionDate?.let { DetailRow("First Seen", it) }
+
+            // ── Column 3: Community ──────────────────────────────────
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                SectionHeader("Community")
+                file.reputation?.let { rep ->
+                    val sign = if (rep >= 0) "+" else ""
+                    val repColor = when {
+                        rep > 0 -> AppColors.CleanGreen
+                        rep < 0 -> AppColors.MaliciousRed
+                        else -> dimText
+                    }
+                    DetailRow("Reputation", "$sign$rep", valueColor = repColor)
+                }
+                file.totalVotes?.let { votes ->
+                    DetailRow("Votes", "${votes.harmless} harmless / ${votes.malicious} malicious")
+                }
+                file.timesSubmitted?.let { DetailRow("Submitted", "${it}x") }
+                file.firstSubmissionDate?.let { DetailRow("First Seen", it) }
+            }
+        }
+
+        // ── AV Detections (per-engine hits) ────────────────────────
+        file.engineHits?.takeIf { it.isNotEmpty() }?.let { hits ->
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 12.dp),
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            ) {
+                SectionHeader("AV Detections (${hits.size})")
+                hits.forEach { hit ->
+                    DetailRow(hit.engine, hit.verdict, valueColor = accentColor)
+                }
+            }
         }
     }
 }

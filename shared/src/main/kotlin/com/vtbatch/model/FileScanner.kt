@@ -44,7 +44,9 @@ private val EXECUTABLE_MAGIC_SIGNATURES = listOf(
  * Uses java.nio.file (modern Java file API) instead of Python's pathlib.
  */
 class FileScanner(
-    private val extensions: Set<String> = ExtensionsConfig.getSuspiciousExtensions()
+    private val extensions: Set<String> = ExtensionsConfig.getSuspiciousExtensions(),
+    private val maxDepth: Int = 20,
+    private val maxFiles: Int = 1000
 ) {
     /** Reload extensions from config */
     fun reloadExtensions(): FileScanner = FileScanner(ExtensionsConfig.getSuspiciousExtensions())
@@ -69,9 +71,11 @@ class FileScanner(
                     else emptyList()
                 }
                 Files.isDirectory(resolved) -> {
-                    Files.walk(resolved, FileVisitOption.FOLLOW_LINKS).use { stream ->
+                    Files.walk(resolved, maxDepth, FileVisitOption.FOLLOW_LINKS).use { stream ->
                         stream.filter { it.isRegularFile() }
+                            .filter { !Files.isHidden(it) }
                             .filter { isSuspicious(it) }
+                            .limit(maxFiles.toLong())
                             .map { it.toString() }
                             .toList()
                     }

@@ -48,17 +48,20 @@ data class VTQuotaInfo(
 /**
  * Fetches user info and quota from VirusTotal API.
  * Matches Python's user_info.py.
+ *
+ * @param sharedClient An existing HttpClient to reuse (avoids creating a new one per call).
+ *                     If null, a temporary client is created and closed after the request.
  */
-suspend fun getUserInfo(apiKey: String, user: String, config: AppConfig = AppConfig.default, engine: HttpClientEngine = OkHttp.create()): VTUserInfoResponse? {
+suspend fun getUserInfo(
+    apiKey: String,
+    user: String,
+    config: AppConfig = AppConfig.default,
+    engine: HttpClientEngine = OkHttp.create(),
+    sharedClient: HttpClient? = null
+): VTUserInfoResponse? {
     return try {
-        val client = HttpClient(engine) {
-            install(HttpTimeout) { requestTimeoutMillis = config.shortTimeout * 1000L }
-            install(ContentNegotiation) {
-                json(Json { ignoreUnknownKeys = true })
-            }
-        }
-        client.use {
-            val response = it.get("${config.apiBaseUrl}/users/$user") {
+        val performRequest: suspend (HttpClient) -> VTUserInfoResponse? = { client ->
+            val response = client.get("${config.apiBaseUrl}/users/$user") {
                 header("x-apikey", apiKey)
             }
             if (response.status == HttpStatusCode.OK) response.body<VTUserInfoResponse>()
@@ -66,6 +69,18 @@ suspend fun getUserInfo(apiKey: String, user: String, config: AppConfig = AppCon
                 logger.warn { "getUserInfo non-200: ${response.status}" }
                 null
             }
+        }
+
+        if (sharedClient != null) {
+            performRequest(sharedClient)
+        } else {
+            // Fallback: create a temporary client and close it after use
+            HttpClient(engine) {
+                install(HttpTimeout) { requestTimeoutMillis = config.shortTimeout * 1000L }
+                install(ContentNegotiation) {
+                    json(Json { ignoreUnknownKeys = true })
+                }
+            }.use { performRequest(it) }
         }
     } catch (e: Exception) {
         logger.error { "Error getting user info: ${e.javaClass.simpleName}: ${e.message}" }

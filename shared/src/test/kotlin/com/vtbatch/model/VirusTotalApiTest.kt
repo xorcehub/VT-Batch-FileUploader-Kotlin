@@ -70,9 +70,9 @@ class VirusTotalApiTest {
     }
 
     @Test
-    fun `validateCredentials returns false on connection error`() = runTest {
+    fun `validateCredentials throws on connection error`() = runTest {
         val api = apiWithException(ConnectException("Connection refused"))
-        assertTrue(!api.validateCredentials())
+        assertFailsWith<ConnectException> { api.validateCredentials() }
         api.close()
     }
 

@@ -38,11 +38,23 @@ sealed class AppIntent {
     /** User clicked "Clear" to reset everything */
     object ClearList : AppIntent()
 
+    /** User clicked "Export" to save the current file list (with VT data) to JSON */
+    object ExportFiles : AppIntent()
+
     /** User triggered the credential dialog */
     object ShowCredentialDialog : AppIntent()
 
     /** User dismissed the credential dialog */
     object HideCredentialDialog : AppIntent()
+
+    /** User opened the settings dialog */
+    object ShowSettingsDialog : AppIntent()
+
+    /** User dismissed the settings dialog */
+    object HideSettingsDialog : AppIntent()
+
+    /** User saved settings from the dialog */
+    data class SaveSettings(val settings: UserSettings) : AppIntent()
 
     /** User submitted credentials via the dialog or command */
     data class SubmitCredentials(val apiKey: String, val persist: Boolean = true) : AppIntent()
@@ -60,6 +72,9 @@ sealed class AppIntent {
 
     /** File scanning completed — here are the entries (with MD5 hashes and cache status) */
     data class FilesScanned(val files: List<FileEntry>, val summary: String) : AppIntent()
+
+    /** Directory scan started (walking filesystem) */
+    object ScanStarted : AppIntent()
 
     /** A single file was hash-checked against VT */
     data class FileProcessed(val path: String, val updatedEntry: FileEntry) : AppIntent()
@@ -86,7 +101,7 @@ sealed class AppIntent {
     /** Overall hashing progress bar update */
     data class HashingProgress(
         val percent: Float,
-        val speedMbps: Float,
+        val speedMBps: Float,
         val fileCount: Int,
         val elapsedFormatted: String
     ) : AppIntent()
@@ -94,7 +109,7 @@ sealed class AppIntent {
     /** Overall upload progress / speed */
     data class UploadSpeed(
         val percent: Float,
-        val speedMbps: Float,
+        val speedMBps: Float,
         val fileCount: Int,
         val elapsedFormatted: String
     ) : AppIntent()
@@ -136,4 +151,10 @@ sealed class AppIntent {
 
     /** Upload batch completed */
     object UploadCompleted : AppIntent()
+
+    /** Settings were applied successfully */
+    data class SettingsSaved(val overriddenFields: Set<String>) : AppIntent()
+
+    /** Settings failed to save */
+    data class SettingsError(val message: String) : AppIntent()
 }

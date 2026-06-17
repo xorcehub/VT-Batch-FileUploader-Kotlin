@@ -7,14 +7,22 @@ import java.time.format.DateTimeFormatter
 /**
  * Appends crash logs to ~/.vtbatch/crash.log
  * Checked on startup to surface previous-session crashes.
+ * Log file is rotated when it exceeds 1MB to prevent unbounded growth.
  */
 object CrashLogger {
+    private const val MAX_LOG_SIZE = 1_000_000L // 1MB
     private val logDir = File(System.getProperty("user.home"), ".vtbatch")
     private val logFile = File(logDir, "crash.log")
 
     fun logCrash(exception: Throwable) {
         try {
             logDir.mkdirs()
+            // Rotate if file exceeds size limit — keep only the most recent entries
+            if (logFile.exists() && logFile.length() > MAX_LOG_SIZE) {
+                val lines = logFile.readLines()
+                val kept = lines.takeLast(250)
+                logFile.writeText(kept.joinToString("\n") + "\n")
+            }
             val timestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
             val entry = buildString {
                 appendLine("=== CRASH $timestamp ===")

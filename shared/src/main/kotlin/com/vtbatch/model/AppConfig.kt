@@ -20,6 +20,7 @@ const val SHORT_TIMEOUT = 15
 const val LONG_TIMEOUT = 60
 
 // Retry configuration
+const val MAX_FILE_SIZE_MB = 650
 const val MAX_RETRIES = 3
 const val RETRY_DELAY = 1.0
 const val RETRY_BACKOFF = 2.0
@@ -90,6 +91,7 @@ data class AppConfig(
     val shortTimeout: Int = envInt("VT_SHORT_TIMEOUT", SHORT_TIMEOUT),
     val longTimeout: Int = envInt("VT_LONG_TIMEOUT", LONG_TIMEOUT),
     val rateLimitPerMinute: Int = envInt("VT_RATE_LIMIT", VT_FREE_TIER_REQUESTS_PER_MINUTE),
+    val maxRetries: Int = envInt("VT_MAX_RETRIES", MAX_RETRIES),
 
     // Upload
     val largeFileThreshold: Int = envInt("VT_LARGE_FILE_THRESHOLD", LARGE_FILE_THRESHOLD),
@@ -155,5 +157,56 @@ data class AppConfig(
     companion object {
         /** Global singleton config — like Python's get_config() */
         val default: AppConfig by lazy { AppConfig() }
+
+        /** Metadata for user-facing settings fields */
+        data class FieldMeta(
+            val fieldName: String,
+            val envVar: String,
+            val default: Int,
+            val label: String,
+            val unit: String = "seconds"
+        )
+
+        val USER_FACING_FIELDS: List<FieldMeta> = listOf(
+            FieldMeta("analysisInitialDelay", "VT_ANALYSIS_INITIAL_DELAY", ANALYSIS_INITIAL_DELAY, "Analysis Initial Delay"),
+            FieldMeta("analysisPollInterval", "VT_ANALYSIS_POLL_INTERVAL", ANALYSIS_POLL_INTERVAL, "Analysis Poll Interval"),
+            FieldMeta("analysisMaxRetries", "VT_ANALYSIS_MAX_RETRIES", ANALYSIS_MAX_RETRIES, "Analysis Max Retries"),
+            FieldMeta("cacheDurationHours", "VT_CACHE_DURATION_HOURS", CACHE_DURATION_HOURS, "Cache Duration", "hours"),
+            FieldMeta("shortTimeout", "VT_SHORT_TIMEOUT", SHORT_TIMEOUT, "API Request Timeout"),
+        )
+
+        /**
+         * Resolve config with priority: hardcoded default → settings.json → env var (highest).
+         * Returns the resolved config and a set of field names overridden by env vars.
+         */
+        fun resolve(settings: UserSettings = UserSettings()): Pair<AppConfig, Set<String>> {
+            val overriddenFields = mutableSetOf<String>()
+
+            fun resolveInt(fieldName: String, envVar: String, default: Int): Int {
+                val envVal = System.getenv(envVar)
+                if (envVal != null) {
+                    overriddenFields.add(fieldName)
+                    return envVal.toIntOrNull() ?: default
+                }
+                val settingsVal: Int? = when (fieldName) {
+                    "analysisInitialDelay" -> settings.analysisInitialDelay
+                    "analysisPollInterval" -> settings.analysisPollInterval
+                    "analysisMaxRetries" -> settings.analysisMaxRetries
+                    "cacheDurationHours" -> settings.cacheDurationHours
+                    "shortTimeout" -> settings.shortTimeout
+                    else -> null
+                }
+                return settingsVal ?: default
+            }
+
+            val config = AppConfig(
+                analysisInitialDelay = resolveInt("analysisInitialDelay", "VT_ANALYSIS_INITIAL_DELAY", ANALYSIS_INITIAL_DELAY),
+                analysisPollInterval = resolveInt("analysisPollInterval", "VT_ANALYSIS_POLL_INTERVAL", ANALYSIS_POLL_INTERVAL),
+                analysisMaxRetries = resolveInt("analysisMaxRetries", "VT_ANALYSIS_MAX_RETRIES", ANALYSIS_MAX_RETRIES),
+                cacheDurationHours = resolveInt("cacheDurationHours", "VT_CACHE_DURATION_HOURS", CACHE_DURATION_HOURS),
+                shortTimeout = resolveInt("shortTimeout", "VT_SHORT_TIMEOUT", SHORT_TIMEOUT),
+            )
+            return config to overriddenFields
+        }
     }
 }

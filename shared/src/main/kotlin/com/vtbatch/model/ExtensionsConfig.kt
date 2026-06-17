@@ -16,16 +16,33 @@ object ExtensionsConfig {
 
     // Default extensions matching the Python version
     private val DEFAULT_EXTENSIONS = setOf(
-        // Executables and Libraries
-        ".exe", ".dll", ".ocx", ".sys", ".scr", ".drv",
-        // Scripting
-        ".bat", ".cmd", ".ps1", ".vbs", ".js", ".wsf", ".hta", ".vbe", ".jse",
+        // Windows Executables and Libraries
+        ".exe", ".dll", ".ocx", ".sys", ".scr", ".drv", ".com", ".cpl",
+        // Windows Installers & Packages
+        ".msi", ".msix", ".appx",
+        // Windows Shortcuts & Scripts
+        ".bat", ".cmd", ".ps1", ".psm1", ".psd1", ".vbs", ".js", ".wsf",
+        ".hta", ".vbe", ".jse", ".lnk", ".url", ".reg", ".inf",
+        // Scripting Languages
+        ".py", ".pyc", ".rb", ".pl", ".lua", ".wsh", ".sct",
         // Office Documents with Macros
         ".docm", ".xlsm", ".pptm",
         // Legacy Office Documents
         ".doc", ".xls", ".ppt",
         // Archives & Installers
-        ".zip", ".rar", ".7z", ".gz", ".iso", ".msi", ".jar",
+        ".zip", ".rar", ".7z", ".gz", ".iso", ".jar", ".cab", ".deb", ".rpm",
+        // macOS
+        ".dmg", ".pkg",
+        // Android
+        ".apk", ".dex", ".aab", ".xapk",
+        // iOS
+        ".ipa",
+        // Linux
+        ".appimage", ".snap", ".flatpak",
+        // Help & Documentation (can contain embedded executables)
+        ".chm", ".hlp",
+        // Disk Images
+        ".img", ".vhd", ".vmdk",
     )
 
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
@@ -33,8 +50,15 @@ object ExtensionsConfig {
     @Serializable
     private data class ExtensionsFile(val extensions: List<String>)
 
+    /** Resolve config file to ~/.vtbatch/ for consistency across launch locations */
+    private fun resolveConfigFile(): File {
+        val dir = File(System.getProperty("user.home"), ".vtbatch")
+        dir.mkdirs()
+        return File(dir, "suspicious_extensions.json")
+    }
+
     private fun loadJsonExtensions(): Set<String> = synchronized(this) {
-        val configFile = File("suspicious_extensions.json")
+        val configFile = resolveConfigFile()
         if (!configFile.exists()) {
             try {
                 val data = ExtensionsFile(DEFAULT_EXTENSIONS.toList())
@@ -54,10 +78,15 @@ object ExtensionsConfig {
         }
     }
 
-    /** Load extensions: defaults + JSON + env var */
+    /** Load extensions: JSON config file (the single source of truth) + env var override.
+     *
+     *  The file is seeded with DEFAULT_EXTENSIONS on first run (see loadJsonExtensions);
+     *  after that it is the truth — add-ext/remove-ext edit it directly. The in-code
+     *  DEFAULT_EXTENSIONS constant is NOT merged back in at scan time, so removing a
+     *  default (e.g. .cab) actually takes effect. The env var is an additive override
+     *  on top of whatever the file says. */
     fun getSuspiciousExtensions(): Set<String> {
-        val exts = DEFAULT_EXTENSIONS.toMutableSet()
-        loadJsonExtensions().let { exts.addAll(it) }
+        val exts = loadJsonExtensions().toMutableSet()
 
         // Env var override: VT_SUSPICIOUS_EXTENSIONS=.exe,.dll,.ps1
         System.getenv("VT_SUSPICIOUS_EXTENSIONS")?.let { env ->
@@ -79,17 +108,20 @@ object ExtensionsConfig {
         }
     }
 
-    /** Remove an extension from the JSON config file */
+    /** Remove an extension from the JSON config file. No-op (with a log line) if the
+     *  extension is not currently configured, so the caller isn't left guessing. */
     fun removeExtension(ext: String) {
         val normalized = if (ext.startsWith(".")) ext else ".$ext"
         val current = loadJsonExtensions().toMutableList()
         if (current.remove(normalized)) {
             saveJsonExtensions(current)
+        } else {
+            logger.info { "Extension $normalized is not in the configured scan list; nothing to remove." }
         }
     }
 
     private fun saveJsonExtensions(extensions: List<String>) = synchronized(this) { try {
-            val configFile = File("suspicious_extensions.json")
+            val configFile = resolveConfigFile()
             val data = ExtensionsFile(extensions)
             configFile.writeText(json.encodeToString(ExtensionsFile.serializer(), data))
         } catch (e: Exception) {

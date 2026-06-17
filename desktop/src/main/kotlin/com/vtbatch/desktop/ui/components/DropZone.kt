@@ -4,11 +4,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
@@ -20,6 +23,7 @@ import androidx.compose.ui.unit.dp
 fun DropZone(
     modifier: Modifier = Modifier,
     isDragOver: Boolean = false,
+    isScanning: Boolean = false,
     onDrop: (List<String>) -> Unit,
     onSubmitCommand: (String) -> Unit
 ) {
@@ -45,10 +49,17 @@ fun DropZone(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = if (isDragOver) "Drop files here..." else "Drag & Drop Files Here",
+                text = when {
+                    isDragOver -> "Drop files here..."
+                    isScanning -> "Scanning directory..."
+                    else -> "Drag & Drop Files Here"
+                },
                 style = MaterialTheme.typography.bodyLarge,
-                color = if (isDragOver) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = when {
+                    isDragOver -> MaterialTheme.colorScheme.primary
+                    isScanning -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
                 textAlign = TextAlign.Center
             )
         }
@@ -63,6 +74,15 @@ fun DropZone(
             placeholder = { Text("Type a command (help, check, force, etc.) or drag files above...") },
             singleLine = true,
             shape = RoundedCornerShape(8.dp),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(
+                onSend = {
+                    if (commandText.isNotBlank()) {
+                        onSubmitCommand(commandText)
+                        commandText = ""
+                    }
+                }
+            ),
             trailingIcon = {
                 TextButton(
                     onClick = {

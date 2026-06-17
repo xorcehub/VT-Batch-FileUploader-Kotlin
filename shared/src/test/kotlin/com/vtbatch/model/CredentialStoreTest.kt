@@ -37,15 +37,32 @@ class CredentialStoreTest {
     }
 
     @Test
-    fun `save stores Base64-encoded content`() {
+    fun `save stores AES-encrypted content`() {
         val dir = createTempDir()
         val store = createStore(dir)
         store.save("hello-world")
-        // Read the raw file to verify it's Base64, not plaintext
+        // Read the raw file to verify it's not plaintext
         val raw = File(dir, "test-credentials").readText()
         assertFalse(raw.contains("hello-world"), "File should not contain plaintext key")
-        // Verify round-trip to confirm valid Base64
+        // Verify it's valid Base64 (AES ciphertext is binary, encoded as Base64)
+        assertTrue(raw.length > 30, "Encrypted + Base64 output should be longer than plaintext")
+        // Verify round-trip works
         assertEquals("hello-world", store.load())
+        cleanup(dir)
+    }
+
+    @Test
+    fun `save produces different ciphertext on each call`() {
+        val dir = createTempDir()
+        val store = createStore(dir)
+        store.save("same-key")
+        val first = File(dir, "test-credentials").readText()
+        store.save("same-key")
+        val second = File(dir, "test-credentials").readText()
+        // Random IV means different ciphertext each time, even for same plaintext
+        assertNotEquals(first, second, "Each save should produce different ciphertext due to random IV")
+        // But both should decrypt to the same value
+        assertEquals("same-key", store.load())
         cleanup(dir)
     }
 
@@ -106,6 +123,29 @@ class CredentialStoreTest {
         val store = createStore(dir)
         File(dir, "test-credentials").writeText("not-valid-base64!!!")
         assertNull(store.load())
+        cleanup(dir)
+    }
+
+    @Test
+    fun `load migrates legacy Base64 format`() {
+        val dir = createTempDir()
+        val store = createStore(dir)
+        // Write a legacy-format Base64-encoded key (just Base64 of the plaintext)
+        // Use a realistic-length key (VT API keys are 64 chars)
+        val legacyKey = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+        val encoded = java.util.Base64.getEncoder().encodeToString(legacyKey.toByteArray())
+        File(dir, "test-credentials").writeText(encoded)
+
+        // Should decrypt via legacy path, then re-save in AES format
+        val loaded = store.load()
+        assertEquals(legacyKey, loaded)
+
+        // File should now be AES-encrypted (longer than simple Base64)
+        val rawAfter = File(dir, "test-credentials").readText()
+        assertTrue(rawAfter.length > encoded.length, "File should be re-saved in AES format (larger)")
+
+        // Re-loading should still work from AES format
+        assertEquals(legacyKey, store.load())
         cleanup(dir)
     }
 
@@ -175,5 +215,12 @@ class CredentialStoreTest {
         store.save(specialKey)
         assertEquals(specialKey, store.load())
         cleanup(dir)
+    }
+}
+
+// Kotlin test doesn't have assertNotEquals in older versions; provide it
+private fun assertNotEquals(expected: Any?, actual: Any?, message: String? = null) {
+    if (expected == actual) {
+        throw AssertionError(message ?: "Expected <$expected> to NOT equal <$actual>")
     }
 }

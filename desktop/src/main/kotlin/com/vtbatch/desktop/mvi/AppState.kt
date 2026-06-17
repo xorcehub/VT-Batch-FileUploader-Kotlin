@@ -60,9 +60,18 @@ data class AppState(
     /** Whether files are being dragged over the window */
     val isDragOver: Boolean = false,
 
+    /** Whether a directory scan is in progress (between drop and file list) */
+    val isScanning: Boolean = false,
+
     /** API key available and valid */
     val hasCredentials: Boolean = false,
 
     /** Currently expanded file row (click to toggle detail panel) */
-    val expandedFilePath: String? = null
+    val expandedFilePath: String? = null,
+
+    /** Whether the settings dialog is visible */
+    val showSettingsDialog: Boolean = false,
+
+    /** Which fields are overridden by env vars */
+    val envOverriddenFields: Set<String> = emptySet()
 )

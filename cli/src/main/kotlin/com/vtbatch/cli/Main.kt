@@ -6,6 +6,8 @@ import picocli.CommandLine.Option
 import picocli.CommandLine.Parameters
 import picocli.CommandLine.ParentCommand
 import java.util.concurrent.Callable
+import kotlinx.coroutines.runBlocking
+import com.vtbatch.model.LocalTelemetry
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Root command with global options
@@ -26,7 +28,7 @@ import java.util.concurrent.Callable
     ]
 )
 class RootCommand : Callable<Int> {
-    @Option(names = ["--api-key"], description = ["VirusTotal API key (or set VT_API_KEY env var)"])
+    @Option(names = ["--api-key"], description = ["VirusTotal API key (or set VT_API_KEY env var). Note: env vars are visible to other users via /proc on Linux."])
     var apiKey: String? = null
 
     @Option(names = ["--output", "-o"], description = ["Output format: json (default) or text"], defaultValue = "json")
@@ -69,6 +71,8 @@ class RootCommand : Callable<Int> {
 // ═══════════════════════════════════════════════════════════════════════
 
 fun main(args: Array<String>) {
+    // Record CLI session for telemetry (desktop does this at startup too)
+    runBlocking { LocalTelemetry().recordSession() }
     val exitCode = CommandLine(RootCommand()).execute(*args)
     System.exit(exitCode)
 }

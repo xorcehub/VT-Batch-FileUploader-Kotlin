@@ -12,14 +12,29 @@ object AppReducer {
 
     private const val MAX_LOG_SIZE = 500
 
-    private fun List<String>.append(message: String): List<String> =
-        (this + message).takeLast(MAX_LOG_SIZE)
+    private fun List<String>.append(message: String): List<String> {
+        val timestamp = java.time.LocalTime.now().format(
+            java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")
+        )
+        return (this + "[$timestamp] $message").takeLast(MAX_LOG_SIZE)
+    }
+
+    /** Update a single file entry by path, leaving others unchanged. */
+    private fun List<FileEntry>.updateByPath(
+        path: String,
+        transform: (FileEntry) -> FileEntry
+    ): List<FileEntry> = map { if (it.path == path) transform(it) else it }
 
     fun reduce(state: AppState, intent: AppIntent): AppState = when (intent) {
         // ── User actions ────────────────────────────────────────────────
 
         is AppIntent.DropFiles -> state.copy(
-            statusLog = state.statusLog.append("Scanning dropped paths...")
+            statusLog = state.statusLog.append("Scanning dropped paths..."),
+            isScanning = true
+        )
+
+        is AppIntent.ScanStarted -> state.copy(
+            isScanning = true
         )
 
         is AppIntent.SubmitCommand -> state.copy(
@@ -82,6 +97,17 @@ object AppReducer {
             )
         }
 
+        is AppIntent.ExportFiles -> {
+            val count = state.files.size
+            state.copy(
+                statusLog = if (count == 0) {
+                    state.statusLog.append("Nothing to export — file list is empty.")
+                } else {
+                    state.statusLog.append("Exporting $count file(s) to JSON...")
+                }
+            )
+        }
+
         is AppIntent.ClearList -> state.copy(
             files = emptyList(),
             isProcessing = false,
@@ -91,7 +117,7 @@ object AppReducer {
             totalProgress = ProgressInfo(),
             currentFile = null,
             currentStatus = null,
-            statusLog = state.statusLog.append("List cleared."),
+            statusLog = state.statusLog.append("File list cleared."),
             findMatches = FindNavigator.FindMatches(),
             expandedFilePath = null
         )
@@ -146,14 +172,13 @@ object AppReducer {
             val merged = (existingMap + intent.files.associateBy { it.path }).values.toList()
             state.copy(
                 files = merged,
-                statusLog = state.statusLog.append(intent.summary)
+                statusLog = state.statusLog.append(intent.summary),
+                isScanning = false
             )
         }
 
         is AppIntent.FileProcessed -> state.copy(
-            files = state.files.map {
-                if (it.path == intent.path) intent.updatedEntry else it
-            }
+            files = state.files.updateByPath(intent.path) { intent.updatedEntry }
         )
 
         is AppIntent.CurrentProcessingChanged -> state.copy(
@@ -162,35 +187,25 @@ object AppReducer {
         )
 
         is AppIntent.FileUploaded -> state.copy(
-            files = state.files.map {
-                if (it.path == intent.path) it.copy(
-                    status = FileStatus.UPLOADED_AWAITING,
-                    analysisUrl = intent.analysisUrl
-                ) else it
+            files = state.files.updateByPath(intent.path) {
+                it.copy(status = FileStatus.UPLOADED_AWAITING, analysisUrl = intent.analysisUrl)
             }
         )
 
         is AppIntent.UploadProgress -> state.copy(
-            files = state.files.map {
-                if (it.path == intent.path) it.copy(
-                    status = FileStatus.UPLOADING
-                ) else it
+            files = state.files.updateByPath(intent.path) {
+                it.copy(status = FileStatus.UPLOADING)
             }
         )
 
         is AppIntent.AnalysisCompleted -> state.copy(
-            files = state.files.map {
-                if (it.path == intent.path) intent.updatedEntry else it
-            },
+            files = state.files.updateByPath(intent.path) { intent.updatedEntry },
             statusLog = state.statusLog.append("Analysis complete: ${intent.updatedEntry.fileName}")
         )
 
         is AppIntent.AnalysisTimeout -> state.copy(
-            files = state.files.map {
-                if (it.path == intent.path) it.copy(
-                    status = FileStatus.ANALYSIS_TIMEOUT,
-                    errorMessage = "Analysis timed out"
-                ) else it
+            files = state.files.updateByPath(intent.path) {
+                it.copy(status = FileStatus.ANALYSIS_TIMEOUT, errorMessage = "Analysis timed out")
             },
             statusLog = state.statusLog.append("Analysis timed out for ${state.files.find { it.path == intent.path }?.fileName ?: intent.path}")
         )
@@ -198,7 +213,7 @@ object AppReducer {
         is AppIntent.HashingProgress -> state.copy(
             hashingProgress = ProgressInfo(
                 percent = intent.percent.toDouble(),
-                speedFormatted = "%.1f MB/s".format(intent.speedMbps),
+                speedFormatted = "%.1f MB/s".format(intent.speedMBps),
                 fileCount = intent.fileCount,
                 elapsedFormatted = intent.elapsedFormatted
             )
@@ -207,7 +222,7 @@ object AppReducer {
         is AppIntent.UploadSpeed -> state.copy(
             uploadProgress = ProgressInfo(
                 percent = intent.percent.toDouble(),
-                speedFormatted = "%.1f MB/s".format(intent.speedMbps),
+                speedFormatted = "%.1f MB/s".format(intent.speedMBps),
                 fileCount = intent.fileCount,
                 elapsedFormatted = intent.elapsedFormatted
             )
@@ -262,6 +277,7 @@ object AppReducer {
 
         is AppIntent.Error -> state.copy(
             statusLog = state.statusLog.append("ERROR: ${intent.message}"),
+            isScanning = false,
             isProcessing = if (state.isProcessing) {
                 // Only clear processing if there are no more files being worked on
                 state.files.none { it.status == FileStatus.HASHING || it.status == FileStatus.PENDING }
@@ -280,6 +296,26 @@ object AppReducer {
             currentFile = null,
             currentStatus = null,
             statusLog = state.statusLog.append("Upload batch complete.")
+        )
+
+        // ── Settings ────────────────────────────────────────────────────
+
+        is AppIntent.ShowSettingsDialog -> state.copy(showSettingsDialog = true)
+
+        is AppIntent.HideSettingsDialog -> state.copy(showSettingsDialog = false)
+
+        is AppIntent.SaveSettings -> state.copy(
+            statusLog = state.statusLog.append("Saving settings...")
+        )
+
+        is AppIntent.SettingsSaved -> state.copy(
+            showSettingsDialog = false,
+            envOverriddenFields = intent.overriddenFields,
+            statusLog = state.statusLog.append("Settings applied.")
+        )
+
+        is AppIntent.SettingsError -> state.copy(
+            statusLog = state.statusLog.append("ERROR: ${intent.message}")
         )
     }
 }

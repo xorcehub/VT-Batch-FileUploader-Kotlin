@@ -37,19 +37,21 @@ fun App(store: AppStore = remember { AppStore() }) {
                 DropZone(
                     modifier = Modifier.fillMaxWidth(),
                     isDragOver = state.isDragOver,
+                    isScanning = state.isScanning,
                     onDrop = { paths -> store.dispatch(AppIntent.DropFiles(paths)) },
                     onSubmitCommand = { text -> store.dispatch(AppIntent.SubmitCommand(text)) }
                 )
 
                 ButtonBar(
                     modifier = Modifier.fillMaxWidth(),
-                    hasCredentials = state.hasCredentials,
+                    isProcessing = state.isProcessing,
+                    isUploading = state.isUploading,
                     onStart = { store.dispatch(AppIntent.StartProcessing) },
                     onPause = { store.dispatch(AppIntent.TogglePause) },
                     onOpenHashed = { store.dispatch(AppIntent.OpenHashedFiles) },
                     onUpload = { store.dispatch(AppIntent.UploadNewFiles) },
                     onClear = { store.dispatch(AppIntent.ClearList) },
-                    onShowCredentialDialog = { store.dispatch(AppIntent.ShowCredentialDialog) }
+                    onExport = { store.dispatch(AppIntent.ExportFiles) }
                 )
 
                 // Middle: File list (takes remaining vertical space)
@@ -106,6 +108,9 @@ fun App(store: AppStore = remember { AppStore() }) {
                     recheckInfo = state.recheckRemaining?.let { remaining ->
                         if (remaining > 0) "${formatSeconds(remaining)} (${state.recheckPendingCount} pending)" else "—"
                     } ?: "—",
+                    hasCredentials = state.hasCredentials,
+                    onApiKeyClick = { store.dispatch(AppIntent.ShowCredentialDialog) },
+                    onSettingsClick = { store.dispatch(AppIntent.ShowSettingsDialog) },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -116,6 +121,16 @@ fun App(store: AppStore = remember { AppStore() }) {
                         onSubmit = { apiKey ->
                             store.dispatch(AppIntent.SubmitCredentials(apiKey))
                         }
+                    )
+                }
+
+                // Settings dialog (shown when user clicks gear icon)
+                if (state.showSettingsDialog) {
+                    SettingsDialog(
+                        effectiveConfig = store.container.config,
+                        overriddenFields = state.envOverriddenFields,
+                        onDismiss = { store.dispatch(AppIntent.HideSettingsDialog) },
+                        onSave = { settings -> store.dispatch(AppIntent.SaveSettings(settings)) }
                     )
                 }
             }

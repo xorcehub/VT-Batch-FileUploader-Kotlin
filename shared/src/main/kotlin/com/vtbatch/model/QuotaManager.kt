@@ -1,9 +1,12 @@
 package com.vtbatch.model
 
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.IOException
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -14,17 +17,30 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 
 private val logger = KotlinLogging.logger {}
 
+/** Minimum free disk space required for cache writes (1 MB) */
+private const val MIN_FREE_SPACE_BYTES = 1_048_576L
+
 /**
  * Manages file scan data cache (JSON file keyed by MD5 hash).
  * Matches the Python QuotaManager behavior: save, load, expire entries.
+ * All write operations are guarded by a Mutex to prevent concurrent clobbering.
  */
 class QuotaManager(
     cacheFile: String? = null,
     private val config: AppConfig = AppConfig.default
 ) {
-    private val cacheFile = File(cacheFile ?: config.cacheFilename)
+    private val cacheFile = File(cacheFile ?: config.cacheFilename).let {
+        if (it.isAbsolute) it else {
+            val dir = File(System.getProperty("user.home"), ".vtbatch")
+            dir.mkdirs()
+            File(dir, it.path)
+        }
+    }
     private val cacheDuration = Duration.ofHours(config.cacheDurationHours.toLong())
-    private val json = Json { ignoreUnknownKeys = true; prettyPrint = true; isLenient = true }
+    // prettyPrint keeps vt_scan_data.json human-readable for manual inspection;
+    // the file is re-encoded wholesale on every write, so it stays consistently formatted.
+    private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
+    private val writeMutex = Mutex()
 
     @Serializable
     data class CacheEntry(
@@ -49,62 +65,115 @@ class QuotaManager(
         @SerialName("last_submission_date") val lastSubmissionDate: Long? = null,
         @SerialName("total_votes_harmless") val totalVotesHarmless: Int? = null,
         @SerialName("total_votes_malicious") val totalVotesMalicious: Int? = null,
+        @SerialName("engine_hits") val engineHits: List<EngineHit>? = null,
     )
 
-    /** Save file statuses to cache */
-    fun saveData(fileStatuses: Map<String, Map<String, Any?>>): Boolean {
-        return try {
-            val existing = loadRaw().toMutableMap()
-
-            for ((filePath, statusData) in fileStatuses) {
-                val md5Hash = statusData["md5_hash"] as? String ?: continue
-                existing[md5Hash] = CacheEntry(
-                    filename = File(filePath).name,
-                    size = File(filePath).length(),
-                    path = filePath,
-                    url = statusData["analysis_url"] as? String,
-                    lastScan = LocalDateTime.now().toString(),
-                    status = statusData["status"] as? String,
-                    lastAnalysisStats = statusData["last_analysis_stats"]?.toString(),
-                    lastAnalysisDate = statusData["last_analysis_date"] as? Long,
-                )
+    /**
+     * Check if there is enough disk space to write the cache.
+     * Returns true if safe to write, false if disk is too full.
+     */
+    private fun checkDiskSpace(): Boolean {
+        val parentDir = cacheFile.parentFile ?: return true
+        if (!parentDir.exists()) return true // will be created by writeText
+        val freeBytes = parentDir.freeSpace
+        if (freeBytes < MIN_FREE_SPACE_BYTES) {
+            logger.error {
+                "Insufficient disk space: ${freeBytes / 1024}KB free in ${parentDir.absolutePath} " +
+                "(minimum ${MIN_FREE_SPACE_BYTES / 1024}KB required)"
             }
+            return false
+        }
+        return true
+    }
 
-            cacheFile.writeText(json.encodeToString(
-                serializer = kotlinx.serialization.serializer<Map<String, CacheEntry>>(),
-                value = existing
-            ))
-            true
-        } catch (e: Exception) {
-            logger.error { "Error saving data: $e" }
-            false
+    /** Save file statuses to cache (guarded by mutex to prevent concurrent clobbering) */
+    suspend fun saveData(fileStatuses: Map<String, Map<String, Any?>>): Boolean {
+        return writeMutex.withLock {
+            try {
+                val existing = loadRaw().toMutableMap()
+
+                for ((filePath, statusData) in fileStatuses) {
+                    val md5Hash = statusData["md5_hash"] as? String ?: continue
+                    existing[md5Hash] = CacheEntry(
+                        filename = statusData["filename"] as? String ?: File(filePath).name,
+                        size = statusData["size"] as? Long ?: 0L,
+                        path = filePath,
+                        url = statusData["analysis_url"] as? String,
+                        lastScan = LocalDateTime.now().toString(),
+                        status = statusData["status"] as? String,
+                        lastAnalysisStats = statusData["last_analysis_stats"]?.toString(),
+                        lastAnalysisDate = statusData["last_analysis_date"] as? Long,
+                    )
+                }
+
+                if (!checkDiskSpace()) throw CacheError("Insufficient disk space to write cache (${cacheFile.parent})")
+
+                cacheFile.writeText(json.encodeToString(
+                    serializer = kotlinx.serialization.serializer<Map<String, CacheEntry>>(),
+                    value = existing
+                ))
+                true
+            } catch (e: IOException) {
+                logger.error { "I/O error writing cache (disk full?): $e" }
+                throw CacheError("I/O error writing cache (disk full?): ${e.message}")
+            } catch (e: CacheError) {
+                throw e
+            } catch (e: Exception) {
+                logger.error { "Error saving data: $e" }
+                throw CacheError("Error saving data: ${e.message}")
+            }
         }
     }
 
-    /** Save a single entry */
-    fun saveEntry(hashId: String, entry: CacheEntry): Boolean {
-        return try {
-            val existing = loadRaw().toMutableMap()
-            existing[hashId] = entry
-            cacheFile.writeText(json.encodeToString(
-                serializer = kotlinx.serialization.serializer<Map<String, CacheEntry>>(),
-                value = existing
-            ))
-            true
-        } catch (e: Exception) {
-            logger.error { "Error saving entry: $e" }
-            false
+    /** Save a single entry (guarded by mutex to prevent concurrent clobbering) */
+    suspend fun saveEntry(hashId: String, entry: CacheEntry): Boolean {
+        return writeMutex.withLock {
+            try {
+                val existing = loadRaw().toMutableMap()
+                existing[hashId] = entry
+
+                if (!checkDiskSpace()) {
+                    logger.error { "Insufficient disk space to write cache (${cacheFile.parent})" }
+                    throw CacheError("Insufficient disk space to write cache (${cacheFile.parent})")
+                }
+
+                cacheFile.writeText(json.encodeToString(
+                    serializer = kotlinx.serialization.serializer<Map<String, CacheEntry>>(),
+                    value = existing
+                ))
+                true
+            } catch (e: IOException) {
+                logger.error { "I/O error writing cache (disk full?): $e" }
+                throw CacheError("I/O error writing cache (disk full?): ${e.message}")
+            } catch (e: CacheError) {
+                throw e
+            } catch (e: Exception) {
+                logger.error { "Error saving entry: $e" }
+                throw CacheError("Error saving entry: ${e.message}")
+            }
         }
     }
 
-    /** Clear cache */
-    fun clearCache(): Boolean {
-        return try {
-            cacheFile.writeText("{}")
-            true
-        } catch (e: Exception) {
-            logger.error { "Error clearing cache: $e" }
-            false
+    /** Clear cache (guarded by mutex to prevent concurrent clobbering) */
+    suspend fun clearCache(): Boolean {
+        return writeMutex.withLock {
+            try {
+                if (!checkDiskSpace()) {
+                    logger.error { "Insufficient disk space to write cache (${cacheFile.parent})" }
+                    throw CacheError("Insufficient disk space to write cache (${cacheFile.parent})")
+                }
+
+                cacheFile.writeText("{}")
+                true
+            } catch (e: IOException) {
+                logger.error { "I/O error clearing cache: $e" }
+                throw CacheError("I/O error clearing cache: ${e.message}")
+            } catch (e: CacheError) {
+                throw e
+            } catch (e: Exception) {
+                logger.error { "Error clearing cache: $e" }
+                throw CacheError("Error clearing cache: ${e.message}")
+            }
         }
     }
 

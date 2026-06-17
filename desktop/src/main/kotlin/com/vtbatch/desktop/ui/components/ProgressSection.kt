@@ -40,7 +40,7 @@ private fun ProgressRow(
             modifier = Modifier.width(80.dp)
         )
         LinearProgressIndicator(
-            progress = { progress.percent.toFloat() },
+            progress = { progress.percent.toFloat().coerceIn(0f, 1f) },
             modifier = Modifier.weight(1f).height(8.dp),
             color = color,
             trackColor = MaterialTheme.colorScheme.surfaceVariant,

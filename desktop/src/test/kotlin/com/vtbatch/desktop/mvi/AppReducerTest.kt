@@ -25,7 +25,7 @@ class AppReducerTest {
     @Test
     fun `SubmitCommand echoes command to log`() {
         val result = reducer.reduce(initialState, AppIntent.SubmitCommand("help"))
-        assertEquals("> help", result.statusLog.last())
+        assertTrue(result.statusLog.last().endsWith("> help"))
     }
 
     @Test
@@ -80,6 +80,21 @@ class AppReducerTest {
         ))
         val result = reducer.reduce(state, AppIntent.OpenHashedFiles)
         assertTrue(result.statusLog.last().contains("1 file"))
+    }
+
+    @Test
+    fun `ExportFiles logs export count when files present`() {
+        val state = initialState.copy(files = listOf(
+            FileEntry(path = "a.exe", fileName = "a.exe", fileSizeBytes = 100, fileSizeFormatted = "100 B")
+        ))
+        val result = reducer.reduce(state, AppIntent.ExportFiles)
+        assertTrue(result.statusLog.last().contains("Exporting 1 file"))
+    }
+
+    @Test
+    fun `ExportFiles warns when list is empty`() {
+        val result = reducer.reduce(initialState, AppIntent.ExportFiles)
+        assertTrue(result.statusLog.last().contains("Nothing to export"))
     }
 
     @Test
@@ -256,7 +271,7 @@ class AppReducerTest {
     @Test
     fun `LogMessage adds to status log`() {
         val result = reducer.reduce(initialState, AppIntent.LogMessage("Info message"))
-        assertEquals("Info message", result.statusLog.last())
+        assertTrue(result.statusLog.last().endsWith("Info message"))
     }
 
     // ── Find ────────────────────────────────────────────────────────
