@@ -1,8 +1,21 @@
 package com.vtbatch.model
 
+import kotlinx.serialization.Serializable
+
 // Data classes for VirusTotal API responses.
 // These match the JSON structure VT returns.
 // @Serializable (added in Phase 2) will let us auto-parse JSON into these.
+
+/**
+ * One antivirus engine that flagged a file as malicious/suspicious.
+ * engine  = the AV engine name (e.g. "Kaspersky", "Microsoft")
+ * verdict = the malware name that engine returned (e.g. "Trojan.Win32.Generic")
+ */
+@Serializable
+data class EngineHit(
+    val engine: String,
+    val verdict: String
+)
 
 data class VTFileReport(
     val sha256: String,

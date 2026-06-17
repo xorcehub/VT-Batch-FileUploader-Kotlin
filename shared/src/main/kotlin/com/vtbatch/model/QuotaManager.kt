@@ -63,6 +63,7 @@ class QuotaManager(
         @SerialName("last_submission_date") val lastSubmissionDate: Long? = null,
         @SerialName("total_votes_harmless") val totalVotesHarmless: Int? = null,
         @SerialName("total_votes_malicious") val totalVotesMalicious: Int? = null,
+        @SerialName("engine_hits") val engineHits: List<EngineHit>? = null,
     )
 
     /**

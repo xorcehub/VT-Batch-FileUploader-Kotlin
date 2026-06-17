@@ -50,7 +50,8 @@ fun App(store: AppStore = remember { AppStore() }) {
                     onPause = { store.dispatch(AppIntent.TogglePause) },
                     onOpenHashed = { store.dispatch(AppIntent.OpenHashedFiles) },
                     onUpload = { store.dispatch(AppIntent.UploadNewFiles) },
-                    onClear = { store.dispatch(AppIntent.ClearList) }
+                    onClear = { store.dispatch(AppIntent.ClearList) },
+                    onExport = { store.dispatch(AppIntent.ExportFiles) }
                 )
 
                 // Middle: File list (takes remaining vertical space)

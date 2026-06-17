@@ -46,7 +46,12 @@ data class FileEntry(
     val reputation: Int? = null,                  // community score
     val firstSubmissionDate: String? = null,      // formatted date
     val lastSubmissionDate: String? = null,       // formatted date
-    val totalVotes: Votes? = null
+    val totalVotes: Votes? = null,       // (harmless, malicious)
+
+    // Per-engine detections: which AV engine flagged it and what it called it.
+    // Populated from VT's last_analysis_results. Null/empty when the file is
+    // clean or hasn't been analyzed yet.
+    val engineHits: List<EngineHit>? = null
 ) {
     // Computed once at construction (not on every access).
     // Recomputed automatically when copy() creates a new instance with different params.

@@ -132,6 +132,45 @@ object VTResponseParser {
         return json["data"]?.jsonObject?.get("attributes")?.jsonObject?.longField("last_analysis_date")
     }
 
+    /**
+     * Extract per-engine detections (malicious engines + their verdicts) from a
+     * results container. Same structure for both endpoints, so one helper:
+     *   - /files/{id}     -> attributes.last_analysis_results
+     *   - /analyses/{id}  -> attributes.results
+     * Each entry is {"engine_name": ..., "category": "malicious"|..., "result": ...}.
+     * Returns null when nothing is malicious (so clean files stay null, not []).
+     */
+    fun extractEngineHits(resultsContainer: JsonObject?): List<EngineHit>? {
+        if (resultsContainer == null) return null
+        return try {
+            resultsContainer.entries
+                .filter { it.value.jsonObject["category"]?.jsonPrimitive?.content == "malicious" }
+                .map { (key, data) ->
+                    val dataObj = data.jsonObject
+                    EngineHit(
+                        engine = dataObj["engine_name"]?.jsonPrimitive?.content ?: key,
+                        verdict = dataObj["result"]?.jsonPrimitive?.content ?: "malicious"
+                    )
+                }
+                .sortedBy { it.engine.lowercase() }
+                .takeIf { it.isNotEmpty() }
+        } catch (e: Exception) {
+            logger.warn { "Failed to extract engine hits: ${e.message}" }
+            null
+        }
+    }
+
+    /** Extract per-engine detections from a VT analysis (/analyses/{id}) response. */
+    fun extractEngineHitsFromAnalysis(json: JsonObject): List<EngineHit>? {
+        val results = try {
+            json["data"]?.jsonObject?.get("attributes")?.jsonObject?.get("results")?.jsonObject
+        } catch (e: Exception) {
+            logger.warn { "Failed to read analysis results: ${e.message}" }
+            null
+        }
+        return extractEngineHits(results)
+    }
+
     /** Structured file details extracted from a VT file report response. */
     data class FileDetails(
         val lastAnalysisStats: String?,      // formatted "42 malicious, 28 harmless, ..."
@@ -146,7 +185,8 @@ object VTResponseParser {
         val totalVotesHarmless: Int?,
         val totalVotesMalicious: Int?,
         val detectionCount: Int?,            // malicious count for cache
-        val suggestedThreatLabel: String?    // for cache
+        val suggestedThreatLabel: String?,   // for cache
+        val engineHits: List<EngineHit>? = null  // per-engine detections
     )
 
     /**
@@ -193,6 +233,10 @@ object VTResponseParser {
             // Detection count (malicious engines count)
             val detectionCount = attrs["last_analysis_stats"]?.jsonObject?.intField("malicious")
 
+            // Per-engine detections: pull each engine that flagged the file
+            // as malicious, recording its name and the verdict it returned.
+            val engineHits = extractEngineHits(attrs["last_analysis_results"]?.jsonObject)
+
             FileDetails(
                 lastAnalysisStats = lastAnalysisStats,
                 popularThreatLabel = threatLabel,
@@ -206,7 +250,8 @@ object VTResponseParser {
                 totalVotesHarmless = votesHarmless,
                 totalVotesMalicious = votesMalicious,
                 detectionCount = detectionCount,
-                suggestedThreatLabel = threatLabel
+                suggestedThreatLabel = threatLabel,
+                engineHits = engineHits
             )
         } catch (e: Exception) {
             logger.warn { "Failed to extract file details: ${e.message}" }

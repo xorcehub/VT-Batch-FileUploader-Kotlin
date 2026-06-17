@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -27,7 +28,8 @@ fun ButtonBar(
     onPause: () -> Unit,
     onOpenHashed: () -> Unit,
     onUpload: () -> Unit,
-    onClear: () -> Unit
+    onClear: () -> Unit,
+    onExport: () -> Unit = {}
 ) {
     val busy = isProcessing || isUploading
 
@@ -88,6 +90,16 @@ fun ButtonBar(
                 if (showText) {
                     Spacer(Modifier.width(4.dp))
                     Text("Clear")
+                }
+            }
+            OutlinedButton(
+                onClick = onExport,
+                modifier = Modifier.weight(0.9f)
+            ) {
+                Icon(Icons.Default.Download, contentDescription = "Export")
+                if (showText) {
+                    Spacer(Modifier.width(4.dp))
+                    Text("Export")
                 }
             }
         }

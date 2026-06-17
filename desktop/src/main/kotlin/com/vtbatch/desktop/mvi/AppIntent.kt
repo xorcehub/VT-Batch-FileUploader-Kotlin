@@ -38,6 +38,9 @@ sealed class AppIntent {
     /** User clicked "Clear" to reset everything */
     object ClearList : AppIntent()
 
+    /** User clicked "Export" to save the current file list (with VT data) to JSON */
+    object ExportFiles : AppIntent()
+
     /** User triggered the credential dialog */
     object ShowCredentialDialog : AppIntent()
 

@@ -97,6 +97,17 @@ object AppReducer {
             )
         }
 
+        is AppIntent.ExportFiles -> {
+            val count = state.files.size
+            state.copy(
+                statusLog = if (count == 0) {
+                    state.statusLog.append("Nothing to export — file list is empty.")
+                } else {
+                    state.statusLog.append("Exporting $count file(s) to JSON...")
+                }
+            )
+        }
+
         is AppIntent.ClearList -> state.copy(
             files = emptyList(),
             isProcessing = false,

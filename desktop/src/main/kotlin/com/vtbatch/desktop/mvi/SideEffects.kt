@@ -4,6 +4,8 @@ import com.vtbatch.model.*
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.*
 import java.awt.Desktop
+import java.awt.FileDialog
+import java.awt.Frame
 import java.io.File
 import java.net.URI
 import java.time.Instant
@@ -145,7 +147,8 @@ class SideEffects(
                             lastSubmissionDate = cached.lastSubmissionDate?.let { formatTimestamp(it) },
                             totalVotes = cached.totalVotesHarmless?.let { h ->
                                 cached.totalVotesMalicious?.let { m -> Votes(h, m) }
-                            }
+                            },
+                            engineHits = cached.engineHits
                         ))
                     } else {
                         newCount++
@@ -537,28 +540,30 @@ class SideEffects(
                             if (result != null) {
                                 val status = VTResponseParser.extractAnalysisStatus(result)
                                 if (status == "completed") {
-                                    val stats = VTResponseParser.extractDetectionStatsFromAnalysis(result)
+                                    val ratio = VTResponseParser.extractDetectionStatsFromAnalysis(result)
                                     val sha256 = VTResponseParser.extractSha256FromAnalysis(result)
+                                    // Per-engine hits come straight from the analysis
+                                    // response's `results` map — no extra call needed.
+                                    val engineHits = VTResponseParser.extractEngineHitsFromAnalysis(result)
                                     val lastDate = System.currentTimeMillis() / 1000
+                                    val detectionStats = ratio?.let { VTResponseParser.DetectionStats(it, it) }
 
                                     val updatedEntry = entry.copy(
                                         sha256Hash = sha256,
                                         status = FileStatus.ANALYSIS_COMPLETE,
                                         analysisUrl = sha256?.let { "${VT_FILE_URL}$it" },
-                                        detectionRatio = stats,
-                                        lastAnalysisDate = formatTimestamp(lastDate)
+                                        detectionRatio = ratio,
+                                        lastAnalysisDate = formatTimestamp(lastDate),
+                                        engineHits = engineHits
                                     )
 
-                                    container.quotaManager.saveEntry(entry.md5Hash ?: "", QuotaManager.CacheEntry(
-                                        filename = fileName,
-                                        size = entry.fileSizeBytes,
-                                        path = entry.path,
-                                        url = updatedEntry.analysisUrl,
-                                        lastScan = java.time.LocalDateTime.now().toString(),
-                                        status = "completed",
-                                        lastAnalysisDate = lastDate,
-                                        detections = stats
-                                    ))
+                                    // status="completed" marks freshly-uploaded files;
+                                    // engineHits persist so a re-drop restores them.
+                                    container.quotaManager.saveEntry(
+                                        entry.md5Hash ?: "",
+                                        buildCacheEntry(entry, sha256, lastDate, detectionStats, null)
+                                            .copy(status = "completed", engineHits = engineHits)
+                                    )
 
                                     dispatch(AppIntent.AnalysisCompleted(entry.path, updatedEntry))
                                     iterator.remove()
@@ -690,6 +695,53 @@ class SideEffects(
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    //  EXPORT TO JSON
+    // ═══════════════════════════════════════════════════════════════════
+
+    /** Export the current file list (with all VT data + per-engine detections) to JSON. */
+    fun exportFiles(files: List<FileEntry>) {
+        scope.launch {
+            if (files.isEmpty()) {
+                dispatch(AppIntent.LogMessage("No files to export."))
+                return@launch
+            }
+
+            val target = withContext(Dispatchers.IO) { pickExportFile() }
+            if (target == null) {
+                dispatch(AppIntent.LogMessage("Export cancelled."))
+                return@launch
+            }
+
+            try {
+                val content = withContext(Dispatchers.IO) { FileExporter.toJson(files) }
+                withContext(Dispatchers.IO) { target.writeText(content) }
+                dispatch(AppIntent.LogMessage("Exported ${files.size} file(s) to ${target.absolutePath}."))
+            } catch (e: Exception) {
+                val msg = container.errorHandler.handle(e)
+                dispatch(AppIntent.Error("Export failed: $msg"))
+            }
+        }
+    }
+
+    /**
+     * Show a native "Save As" dialog and return the chosen file.
+     * Returns null if the user cancelled. Ensures a .json extension.
+     */
+    // Compose Desktop renders on an AWT window we don't have a direct handle to
+    // from here, so we grab the first heavyweight Frame as the dialog parent.
+    private fun pickExportFile(): File? {
+        val frame = Frame.getWindows().filterIsInstance<Frame>().firstOrNull()
+        val dialog = FileDialog(frame, "Export to JSON", FileDialog.SAVE)
+        dialog.file = "vtbatch-export.json"
+        dialog.isVisible = true   // modal — blocks until the user picks or cancels
+
+        val dir = dialog.directory ?: return null
+        val name = dialog.file ?: return null
+        val finalName = if (name.endsWith(".json", ignoreCase = true)) name else "$name.json"
+        return File(dir, finalName)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     //  COMMANDS
     // ═══════════════════════════════════════════════════════════════════
 
@@ -719,6 +771,7 @@ class SideEffects(
                 trimmed.equals("update-quota", ignoreCase = true) -> fetchQuota()
                 trimmed.equals("open-red", ignoreCase = true) -> openRedFiles(currentFiles)
                 trimmed.equals("stats", ignoreCase = true) -> showStats()
+                trimmed.equals("export", ignoreCase = true) -> exportFiles(currentFiles)
                 trimmed.equals("api-swap", ignoreCase = true) -> dispatch(AppIntent.LogMessage("Unknown command. Type 'help' for available commands."))
                 else -> dispatch(AppIntent.LogMessage("Unknown command: $trimmed. Type 'help' for available commands."))
             }
@@ -745,6 +798,7 @@ class SideEffects(
             appendLine("  update-quota      — Refresh API quota display")
             appendLine("  open-red          — Open malicious/suspicious files in browser")
             appendLine("  stats             — Show local usage statistics")
+            appendLine("  export            — Export the current file list to JSON")
             appendLine()
             appendLine("Tip: API keys set via VT_API_KEY env var are visible to other users")
             appendLine("     on shared systems. Prefer the credential dialog (AES-encrypted)")
@@ -1098,7 +1152,8 @@ class SideEffects(
             lastSubmissionDate = details.lastSubmissionDate?.let { formatTimestamp(it) },
             totalVotes = details.totalVotesHarmless?.let { h ->
                 details.totalVotesMalicious?.let { m -> Votes(h, m) }
-            }
+            },
+            engineHits = details.engineHits
         )
     }
 
@@ -1129,7 +1184,8 @@ class SideEffects(
         firstSubmissionDate = details?.firstSubmissionDate,
         lastSubmissionDate = details?.lastSubmissionDate,
         totalVotesHarmless = details?.totalVotesHarmless,
-        totalVotesMalicious = details?.totalVotesMalicious
+        totalVotesMalicious = details?.totalVotesMalicious,
+        engineHits = details?.engineHits
     )
 
 

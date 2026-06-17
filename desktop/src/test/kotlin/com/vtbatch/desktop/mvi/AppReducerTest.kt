@@ -83,6 +83,21 @@ class AppReducerTest {
     }
 
     @Test
+    fun `ExportFiles logs export count when files present`() {
+        val state = initialState.copy(files = listOf(
+            FileEntry(path = "a.exe", fileName = "a.exe", fileSizeBytes = 100, fileSizeFormatted = "100 B")
+        ))
+        val result = reducer.reduce(state, AppIntent.ExportFiles)
+        assertTrue(result.statusLog.last().contains("Exporting 1 file"))
+    }
+
+    @Test
+    fun `ExportFiles warns when list is empty`() {
+        val result = reducer.reduce(initialState, AppIntent.ExportFiles)
+        assertTrue(result.statusLog.last().contains("Nothing to export"))
+    }
+
+    @Test
     fun `ClearList resets everything`() {
         val state = initialState.copy(
             files = listOf(FileEntry(path = "a", fileName = "a", fileSizeBytes = 1, fileSizeFormatted = "1 B")),

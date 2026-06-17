@@ -68,6 +68,10 @@ class AppStore(
                 sideEffects.openHashedFiles(state.files)
             }
 
+            is AppIntent.ExportFiles -> {
+                sideEffects.exportFiles(state.files)
+            }
+
             is AppIntent.ClearList -> {
                 sideEffects.cancelAll()
             }
