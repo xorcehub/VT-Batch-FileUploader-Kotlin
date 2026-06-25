@@ -12,13 +12,14 @@ import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.http.content.*
-import kotlinx.io.asSource
-import kotlinx.io.buffered
+import io.ktor.utils.io.ByteWriteChannel
+import io.ktor.utils.io.writeFully
 import kotlin.math.pow
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.net.ConnectException
@@ -41,6 +42,9 @@ class VirusTotalApi(
 ) : java.io.Closeable {
     private val secureKey = SecureApiKey(apiKey)
     private val baseUrl = config.apiBaseUrl
+
+    // Dedicated parser for surfacing VT's error bodies (see extractVtErrorMessage).
+    private val errorJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
     /** Expose the HttpClient for connection-pool reuse (e.g. by getUserInfo). */
     val sharedClient: HttpClient get() = client
@@ -203,28 +207,49 @@ class VirusTotalApi(
 
         return try {
             val totalSize = file.length()
+
+            // Build a byte-exact multipart body that mirrors Python's MultipartEncoder.
+            // The prior appendInput() path produced a malformed part header
+            // (Content-Disposition: filename=...  with no "form-data" disposition type
+            // and no name= field), which VT's large-file Google blobstore endpoint
+            // (https://bigfiles.virustotal.com/_ah/upload/...) rejects with
+            // HTTP 400 "Malformed multipart body" — it parses multipart strictly per
+            // RFC 7578, unlike VT's own lenient /api/v3/files endpoint used for
+            // small files. Here we emit the full RFC 7578 part header, a simple
+            // boundary, and a Content-Length computed from the real header + file +
+            // closing-boundary byte counts, so the engine sends a fixed-length body
+            // (never chunked) and the length is exact. The file is streamed in 64KB
+            // chunks — it never sits whole in memory (no OOM regression).
+            val boundary = "vtbatch-upload-${System.nanoTime()}"
+            val partHeader = (
+                "--$boundary\r\n" +
+                "Content-Disposition: form-data; name=\"file\"; filename=\"${file.name}\"\r\n" +
+                "Content-Type: application/octet-stream\r\n" +
+                "\r\n"
+            ).toByteArray(Charsets.US_ASCII)
+            val closingBoundary = "\r\n--$boundary--\r\n".toByteArray(Charsets.US_ASCII)
+            val totalBodyLength = partHeader.size.toLong() + totalSize + closingBoundary.size.toLong()
+
             val response = client.post(uploadUrl) {
                 header("x-apikey", getApiKey())
                 timeout { requestTimeoutMillis = config.longTimeout * 1000L }
 
-                setBody(
-                    MultiPartFormDataContent(
-                        formData {
-                            // Stream from file via InputProvider instead of buffering
-                            // the entire file into memory. Prevents OOM for large uploads.
-                            appendInput(
-                                key = "file",
-                                headers = Headers.build {
-                                    append(HttpHeaders.ContentDisposition, "filename=${file.name}")
-                                    append(HttpHeaders.ContentType, "application/octet-stream")
-                                },
-                                size = file.length()
-                            ) {
-                                file.inputStream().buffered().asSource().buffered()
+                setBody(object : OutgoingContent.WriteChannelContent() {
+                    override val contentType = ContentType.MultiPart.FormData.withParameter("boundary", boundary)
+                    override val contentLength = totalBodyLength
+                    override suspend fun writeTo(channel: ByteWriteChannel) {
+                        channel.writeFully(partHeader)
+                        file.inputStream().buffered().use { input ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read == -1) break
+                                channel.writeFully(buffer, 0, read)
                             }
                         }
-                    )
-                )
+                        channel.writeFully(closingBoundary)
+                    }
+                })
 
                 onUpload { bytesSentTotal, _ ->
                     onProgress?.invoke(bytesSentTotal, totalSize)
@@ -237,11 +262,22 @@ class VirusTotalApi(
                     val retryAfter = response.headers["Retry-After"]?.toDoubleOrNull()
                     throw APIRateLimitError("Rate limit exceeded during upload", retryAfter = retryAfter, context = mapOf("file_path" to filePath))
                 }
-                else -> throw APIResponseError(
-                    "Upload failed with status ${response.status.value}",
-                    statusCode = response.status.value,
-                    context = mapOf("file_path" to filePath)
-                )
+                else -> {
+                    // VT rejects uploads with a JSON body explaining the actual
+                    // reason (quota/size limits, invalid upload URL, ...). Read it
+                    // and surface it so the user isn't left guessing from the status code.
+                    val bodyText = try { response.bodyAsText() } catch (_: Exception) { "" }
+                    val detail = extractVtErrorMessage(bodyText)
+                    throw APIResponseError(
+                        buildString {
+                            append("Upload failed (HTTP ${response.status.value})")
+                            detail?.let { append(": $it") }
+                        },
+                        statusCode = response.status.value,
+                        responseBody = bodyText.take(500),
+                        context = mapOf("file_path" to filePath)
+                    )
+                }
             }
         } catch (e: VTBatchError) { throw e }
         catch (e: java.net.ConnectException) {
@@ -250,6 +286,30 @@ class VirusTotalApi(
             throw APITimeoutError("Upload timed out", mapOf("file_path" to filePath), e)
         } catch (e: Exception) {
             throw APIConnectionError("Upload failed: ${e.message}", mapOf("file_path" to filePath), e)
+        }
+    }
+
+    /** Parse a VirusTotal error response into a human-readable message.
+     *
+     *  VT errors look like: {"error": {"code": "QuotaExceededError", "message": "..."}}
+     *  Falls back to the raw body text if the shape isn't recognized, so the caller
+     *  still gets VT's explanation rather than just a bare status code. */
+    private fun extractVtErrorMessage(bodyText: String): String? {
+        if (bodyText.isBlank()) return null
+        return try {
+            val err = errorJson.parseToJsonElement(bodyText).jsonObject["error"]?.jsonObject
+            val code = err?.get("code")?.jsonPrimitive?.content
+            val message = err?.get("message")?.jsonPrimitive?.content
+            when {
+                code != null && message != null -> "$code: $message"
+                message != null -> message
+                code != null -> code
+                else -> bodyText.take(500)
+            }
+        } catch (e: Exception) {
+            // Not JSON or unexpected shape — return the raw text so we still learn
+            // something from VT rather than only the HTTP status.
+            bodyText.take(500)
         }
     }
 
