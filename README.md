@@ -1,18 +1,27 @@
 # VT-Batch-FileUploader-Kotlin
 
-A Kotlin + Compose Multiplatform desktop app for batch scanning and uploading files to [VirusTotal](https://www.virustotal.com/). A rewrite of the [Python/Tkinter version](https://github.com/user/VT-Batch-FileUploader) with a modern UI and identical functionality.
+A Kotlin + Compose Multiplatform desktop app for batch scanning and uploading files to [VirusTotal](https://www.virustotal.com/). A rewrite of the private [Python/Tkinter version](https://github.com/xorcehub/VT-Batch-FileUploader) with a modern UI and identical functionality.
+
+Checking a folder of downloads or attachments one file at a time on VirusTotal is tedious. This tool automates the workflow: drop a whole directory, and it hashes, checks, and uploads only the unknowns in one pass — with a local cache so re-scans of known files cost zero API calls.
+
+## Disclaimer
+
+- **Scores aren't verdicts.** A 0-detection file isn't guaranteed safe (it may simply be new or evasive), and a 1–2 detection file isn't automatically malicious (engines false-positive legitimate software). Use results for triage; sandbox anything suspicious before running it.
+- **Respect the VirusTotal Terms of Service and public-API limits** (500 requests/day, 4 requests/minute). Multiple API keys are for switching between valid accounts — not for circumventing quotas.
 
 ## Features
 
 - **Drag & drop** files or directories for scanning
-- **MD5 hashing** with local cache for fast re-scans
-- **Batch upload** files not found on VirusTotal
-- **Analysis polling** - waits for VT results after upload
+- **Local cache** for fast re-scans
 - **Recheck timer** - force re-analysis of known hashes
-- **15+ commands** via the command input (help, check, force, find, list, stats, etc.)
+- **15+ commands** via the text input (help, check, force, find, list, stats, export, etc.)
 - **CLI mode** - same commands available from the terminal
 - **Quota display** - tracks daily/monthly API usage
 - **Pause/resume** - pause processing without losing state
+- **Magic-byte detection** - catches extensionless executables
+- **Expandable detail panel** - per-engine AV analysis for each file
+- **JSON export** - export the file list with per-engine AV detections
+- **Settings dialog** - configure poll intervals, cache TTL, and retries (saved to `settings.json`)
 
 ## Prerequisites
 
@@ -41,8 +50,8 @@ $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-25.0.3.9-hotspot"
 ```
 
 1. Set your VirusTotal API key via:
-   - The credential dialog (click the drop zone and type your key)
-   - Environment variable: `VT_API_KEY` and `VT_USER`
+   - The credential dialog (keys are stored AES-encrypted at rest in `~/.vtbatch/credentials`)
+   - Environment variable: `VT_API_KEY`
 2. Drag files/folders onto the drop zone
 3. Click **Start** to hash and check files against VT
 4. Click **Upload** to send unknown files to VT
@@ -57,11 +66,16 @@ help               Show all commands
 check <hash>       Check a hash on VirusTotal
 update             Refresh file list from VT
 clear              Clear the file list
-force              Force recheck all hashes
+force [hash]       Force recheck all hashes, or a single hash
 find <term>        Search files by name
 list [ext]         List files by extension
 remove-green       Remove clean files (0 detections)
 open-red           Open malicious files in browser
+add-ext <ext>      Add extension to scan config
+remove-ext <ext>   Remove extension from scan config
+api                Show current API key info
+update-quota       Refresh API quota display
+export             Export file list to JSON
 stats              Show local usage statistics
 ```
 
@@ -89,7 +103,7 @@ stats              Show local usage statistics
 .\gradlew.bat :cli:run --args="cache clear"
 ```
 
-**Exit codes:** 0=success, 1=no results, 2=error, 3=auth error, 4=rate limit, 5=network error
+**Exit codes:** 0=success, 1=no results, 2=error, 3=auth error, 4=rate limit, 5=network error, 6=partial success (some files failed)
 
 ## Architecture
 
@@ -118,11 +132,15 @@ User action → Intent → Reducer(oldState, intent) → newState → UI observe
                               which emit further intents with results
 ```
 
-- **AppIntent** - 30 sealed class intents (user actions + async results)
+- **AppIntent** - sealed-class intents (user actions + async results)
 - **AppState** - Single immutable state snapshot
 - **AppReducer** - Pure function, no side effects
 - **AppStore** - StateFlow holder, coroutine-scoped side effect dispatch
 - **SideEffects** - All suspend functions for API calls, file I/O, etc.
+
+### Hash-first workflow
+
+The core design: **never upload before checking the hash.** Hash lookups against VT are cheap and rate-friendly; uploads are the expensive, quota-burning operation. The flow is *hash → lookup → upload only if unknown*, and the local JSON cache extends this across sessions.
 
 ## Packaging
 
@@ -154,12 +172,24 @@ User action → Intent → Reducer(oldState, intent) → newState → UI observe
 
 ## Configuration
 
+Tunables follow a priority chain: **hardcoded default → `settings.json` → env var (highest)**. `settings.json` can be edited from the in-app Settings dialog.
+
+`settings.json` fields (all optional, stored in `~/.vtbatch/`):
+
+| Field | Description |
+|-------|-------------|
+| `analysisPollInterval` | Seconds between VT analysis polls |
+| `analysisInitialDelay` | Seconds before first poll |
+| `analysisMaxRetries` | Max polling attempts |
+| `cacheDurationHours` | Local cache TTL in hours |
+| `shortTimeout` | Short-request timeout in seconds |
+
 Environment variables:
 
 | Variable | Description |
 |----------|-------------|
 | `VT_API_KEY` | VirusTotal API key |
-| `VT_USER` | VirusTotal username |
+| `VT_ANALYSIS_POLL_INTERVAL` | Seconds between VT analysis polls |
 | `VT_SUSPICIOUS_EXTENSIONS` | Comma-separated extensions to scan (e.g. `.exe,.dll,.ps1`) |
 
 ## License
