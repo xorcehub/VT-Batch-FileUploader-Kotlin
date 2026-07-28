@@ -1002,6 +1002,15 @@ class SideEffects(
         dispatch(AppIntent.LogMessage("Requesting re-analysis for ${targets.size} file(s)..."))
 
         for (entry in targets) {
+            // Flip to QUEUED before any network call so the row's Recheck button
+            // disables (spinner) immediately. Otherwise the user can re-fire during
+            // the SHA-256 lookup / requestReanalysis round-trip and VT returns 409
+            // for the duplicate reanalyse request. entry.copy keeps all existing VT
+            // data (detection ratio, URL, engine hits) intact during recheck.
+            dispatch(AppIntent.FileProcessed(entry.path, entry.copy(
+                status = FileStatus.QUEUED_FOR_RECHECK
+            )))
+
             val md5 = entry.md5Hash
             var sha256 = entry.sha256Hash
             try {
@@ -1022,10 +1031,10 @@ class SideEffects(
                     md5 ?: "",
                     entry.lastAnalysisDate?.let { parseDateToEpoch(it) }
                 )
-                dispatch(AppIntent.FileProcessed(entry.path, entry.copy(
-                    status = FileStatus.QUEUED_FOR_RECHECK
-                )))
             } catch (e: Exception) {
+                // Revert the optimistic QUEUED state so the row isn't stuck spinning.
+                // entry.copy(status = entry.status) restores the original status AND data.
+                dispatch(AppIntent.FileProcessed(entry.path, entry.copy(status = entry.status)))
                 dispatch(AppIntent.LogMessage("  Error requesting recheck for ${entry.fileName} (hash=${sha256 ?: md5}): ${e.message}"))
             }
         }

@@ -9,6 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -139,23 +141,43 @@ fun FileListEntry(
                 val hasHash = file.md5Hash != null || file.sha256Hash != null
                 val isRechecking = file.status == FileStatus.QUEUED_FOR_RECHECK ||
                     file.status == FileStatus.RECHECKING
-                if (file.analysisUrl != null || (hasHash && !isRechecking)) {
+                if (file.analysisUrl != null || hasHash) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        // Recheck button (if hashable and not already queued)
+                        // Recheck: filled button normally, swapped for a spinner while
+                        // queued/rechecking so it can't be double-fired (VT's reanalyse
+                        // endpoint 409s on repeats). Data is preserved during recheck, so
+                        // Open VT stays usable beside it.
                         if (hasHash && !isRechecking) {
-                            TextButton(
+                            Button(
                                 onClick = { onRecheck(file.path) },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                ),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                             ) {
-                                Text("Recheck", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "Recheck",
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Recheck", style = MaterialTheme.typography.labelMedium)
                             }
-                        } else if (isRechecking) {
-                            Text(
-                                text = "Queued…",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 8.dp)
-                            )
+                        } else if (hasHash && isRechecking) {
+                            // Reserve the Recheck button's footprint and center the spinner in it,
+                            // so Open VT keeps its position instead of collapsing onto the spinner.
+                            Box(
+                                modifier = Modifier.width(96.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
 
                         // VT link button (if analysis is available)
