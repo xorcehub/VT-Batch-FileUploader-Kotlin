@@ -164,6 +164,13 @@ object AppReducer {
             state.copy(expandedFilePath = newPath)
         }
 
+        is AppIntent.RecheckFile -> {
+            val name = state.files.find { it.path == intent.path }?.fileName ?: intent.path
+            state.copy(
+                statusLog = state.statusLog.append("Requesting recheck for $name...")
+            )
+        }
+
         // ── Async results ──────────────────────────────────────────────
 
         is AppIntent.FilesScanned -> {

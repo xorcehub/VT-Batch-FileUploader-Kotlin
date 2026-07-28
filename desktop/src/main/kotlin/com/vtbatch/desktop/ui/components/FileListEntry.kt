@@ -32,6 +32,7 @@ fun FileListEntry(
     file: FileEntry,
     isExpanded: Boolean = false,
     onToggleExpansion: (String) -> Unit = {},
+    onRecheck: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val accentColor = when (file.colorTag) {
@@ -134,16 +135,44 @@ fun FileListEntry(
                     }
                 }
 
-                // VT link button (if analysis is available)
-                if (file.analysisUrl != null) {
-                    TextButton(onClick = {
-                        try {
-                            if (Desktop.isDesktopSupported()) {
-                                Desktop.getDesktop().browse(URI(file.analysisUrl))
+                // Action buttons
+                val hasHash = file.md5Hash != null || file.sha256Hash != null
+                val isRechecking = file.status == FileStatus.QUEUED_FOR_RECHECK ||
+                    file.status == FileStatus.RECHECKING
+                if (file.analysisUrl != null || (hasHash && !isRechecking)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Recheck button (if hashable and not already queued)
+                        if (hasHash && !isRechecking) {
+                            TextButton(
+                                onClick = { onRecheck(file.path) },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                            ) {
+                                Text("Recheck", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                        } catch (_: Exception) { /* ignore browser launch failures */ }
-                    }) {
-                        Text("Open VT", color = MaterialTheme.colorScheme.primary)
+                        } else if (isRechecking) {
+                            Text(
+                                text = "Queued…",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
+                        }
+
+                        // VT link button (if analysis is available)
+                        if (file.analysisUrl != null) {
+                            TextButton(
+                                onClick = {
+                                    try {
+                                        if (Desktop.isDesktopSupported()) {
+                                            Desktop.getDesktop().browse(URI(file.analysisUrl))
+                                        }
+                                    } catch (_: Exception) { /* ignore browser launch failures */ }
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                            ) {
+                                Text("Open VT", color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
                     }
                 }
             }

@@ -68,6 +68,9 @@ sealed class AppIntent {
     /** Toggle the expanded detail panel for a file row */
     data class ToggleFileExpansion(val path: String) : AppIntent()
 
+    /** User clicked the per-row "Recheck" button to request fresh VT re-analysis for one file */
+    data class RecheckFile(val path: String) : AppIntent()
+
     // ── Async results (from side effects) ──────────────────────────────
 
     /** File scanning completed — here are the entries (with MD5 hashes and cache status) */

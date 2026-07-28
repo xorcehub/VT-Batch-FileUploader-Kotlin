@@ -33,7 +33,7 @@ class SideEffectsTest {
         path: String = "/test/file.exe",
         fileName: String = "file.exe",
         status: FileStatus = FileStatus.HASHED_FOUND,
-        md5Hash: String = "abc123def45600000000000000000000",
+        md5Hash: String? = "abc123def45600000000000000000000",
         detectionRatio: String? = "0/70",
         analysisUrl: String? = "https://www.virustotal.com/gui/file/sha256hash",
         sha256Hash: String? = "sha256hash0000000000000000000000000000000000000000000000",
@@ -357,6 +357,23 @@ class SideEffectsTest {
         val env = createEnv()
         env.sideEffects.executeCommand("force", listOf(testEntry()))
         waitForError(env.dispatched, "No API key")
+        cleanup(env)
+    }
+
+    // Per-row Recheck button -> recheckFile. Guards share the force path.
+    @Test
+    fun `recheckFile without API key shows error`() {
+        val env = createEnv()
+        env.sideEffects.recheckFile(testEntry())
+        waitForError(env.dispatched, "No API key")
+        cleanup(env)
+    }
+
+    @Test
+    fun `recheckFile without any hash shows message`() {
+        val env = createEnv(apiKey = "abcdef1234567890abcdef1234567890")
+        env.sideEffects.recheckFile(testEntry(md5Hash = null, sha256Hash = null))
+        waitForLog(env.dispatched, "no hash available")
         cleanup(env)
     }
 

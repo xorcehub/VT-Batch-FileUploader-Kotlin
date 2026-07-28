@@ -974,6 +974,31 @@ class SideEffects(
             return
         }
 
+        requestReanalysisFor(targets)
+    }
+
+    /**
+     * Recheck a single file from its row button: request fresh re-analysis on VT
+     * and queue it for polling. Reuses the same path as the `force` command.
+     */
+    fun recheckFile(entry: FileEntry) {
+        scope.launch {
+            if (container.virusTotalApi == null) {
+                dispatch(AppIntent.Error("No API key configured."))
+                return@launch
+            }
+            if (entry.md5Hash == null && entry.sha256Hash == null) {
+                dispatch(AppIntent.LogMessage("Cannot recheck ${entry.fileName}: no hash available."))
+                return@launch
+            }
+            requestReanalysisFor(listOf(entry))
+        }
+    }
+
+    /** Shared core of `force` and the per-row Recheck button: request re-analysis,
+     *  track pending, and start the poll timer. Caller pre-validates API key. */
+    private suspend fun requestReanalysisFor(targets: List<FileEntry>) {
+        val api = container.virusTotalApi ?: return
         dispatch(AppIntent.LogMessage("Requesting re-analysis for ${targets.size} file(s)..."))
 
         for (entry in targets) {

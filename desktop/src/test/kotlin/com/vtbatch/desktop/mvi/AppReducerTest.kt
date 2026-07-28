@@ -248,6 +248,22 @@ class AppReducerTest {
     }
 
     @Test
+    fun `RecheckFile logs the file name`() {
+        val state = initialState.copy(files = listOf(
+            FileEntry(path = "/x/malware.exe", fileName = "malware.exe", fileSizeBytes = 1,
+                fileSizeFormatted = "1 B", md5Hash = "abc", status = FileStatus.HASHED_FOUND)
+        ))
+        val result = reducer.reduce(state, AppIntent.RecheckFile("/x/malware.exe"))
+        assertTrue(result.statusLog.last().contains("Requesting recheck for malware.exe"))
+    }
+
+    @Test
+    fun `RecheckFile falls back to path when file missing`() {
+        val result = reducer.reduce(initialState, AppIntent.RecheckFile("/ghost/file.exe"))
+        assertTrue(result.statusLog.last().contains("Requesting recheck for /ghost/file.exe"))
+    }
+
+    @Test
     fun `ProcessingCompleted resets isProcessing`() {
         val state = initialState.copy(isProcessing = true)
         val result = reducer.reduce(state, AppIntent.ProcessingCompleted)
