@@ -51,12 +51,16 @@ private fun ProgressRow(
             style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.width(40.dp)
         )
-        if (progress.speedFormatted.isNotBlank()) {
-            Text(
-                text = "(${progress.speedFormatted})",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        // ponytail: fixed-width, always-reserved speed column. The bar uses
+        // weight(1f) (leftover space), so variable trailing text resizes it as
+        // the MB/s digit count grows ("(4.5 MB/s)" vs "(1234.5 MB/s)") and a
+        // blank speed grows it further. A constant-width box keeps every bar
+        // identical length. 80dp fits "(9999.9 MB/s)"; widen if speeds exceed it.
+        Text(
+            text = if (progress.speedFormatted.isNotBlank()) "(${progress.speedFormatted})" else "",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(80.dp)
+        )
     }
 }
