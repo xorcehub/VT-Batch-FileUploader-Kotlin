@@ -4,6 +4,8 @@ A Kotlin + Compose Multiplatform desktop app for batch scanning and uploading fi
 
 Checking a folder of downloads or attachments one file at a time on VirusTotal is tedious. This tool automates the workflow: drop a whole directory, and it hashes, checks, and uploads only the unknowns in one pass — with a local cache so re-scans of known files cost zero API calls.
 
+![VT-Batch-FileUploader-Kotlin screenshot](media/Screenshot%202026-07-28%20152047.png)
+
 ## Disclaimer
 
 - **Scores aren't verdicts.** A 0-detection file isn't guaranteed safe (it may simply be new or evasive), and a 1–2 detection file isn't automatically malicious (engines false-positive legitimate software). Use results for triage; sandbox anything suspicious before running it.
