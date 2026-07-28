@@ -360,6 +360,59 @@ class SideEffectsTest {
         cleanup(env)
     }
 
+    // parseForceRecheckTargets: pure parser, no VT API needed.
+    // Dates compared as epochs; "force-older" hyphen + space forms normalize the same.
+    @Test
+    fun `force-older hyphen form selects files older than date`() {
+        val sel = parseForceRecheckTargets("force-older 2030-01-01", listOf(testEntry()))
+        assertEquals(1, sel.targets.size)
+        assertTrue(sel.error == null)
+    }
+
+    @Test
+    fun `force older space form still selects files older than date`() {
+        val sel = parseForceRecheckTargets("force older 2030-01-01", listOf(testEntry()))
+        assertEquals(1, sel.targets.size)
+    }
+
+    @Test
+    fun `force-older excludes files newer than the cutoff`() {
+        val sel = parseForceRecheckTargets("force-older 2000-01-01", listOf(testEntry()))
+        assertTrue(sel.targets.isEmpty())
+    }
+
+    // Regression: the reported bug. "28-07-26" is not YYYY-MM-DD; the old string
+    // compare made every "20xx-..." date sort before it and re-checked everything.
+    // Now the bad format is rejected with an error, not silently applied.
+    @Test
+    fun `force-older rejects non-ISO date instead of matching everything`() {
+        val sel = parseForceRecheckTargets("force-older 28-07-26", listOf(testEntry()))
+        assertTrue(sel.targets.isEmpty())
+        assertTrue(sel.error?.contains("Could not parse date") == true)
+    }
+
+    // Regression: a file last analyzed on the cutoff day is NOT "older than" it.
+    // testEntry().lastAnalysisDate = "2025-01-15 10:30".
+    @Test
+    fun `force-older excludes a file from the cutoff day itself`() {
+        val sel = parseForceRecheckTargets("force-older 2025-01-15", listOf(testEntry()))
+        assertTrue(sel.targets.isEmpty())
+        assertTrue(sel.error == null)
+    }
+
+    @Test
+    fun `force without args targets all hashed files`() {
+        val sel = parseForceRecheckTargets("force", listOf(testEntry()))
+        assertEquals(1, sel.targets.size)
+    }
+
+    @Test
+    fun `force with hash targets only the matching file`() {
+        val md5 = "abc123def45600000000000000000000"
+        val sel = parseForceRecheckTargets("force $md5", listOf(testEntry(md5Hash = md5)))
+        assertEquals(1, sel.targets.size)
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     //  Case-insensitive commands
     // ═══════════════════════════════════════════════════════════════════

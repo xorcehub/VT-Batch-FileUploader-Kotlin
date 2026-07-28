@@ -9,6 +9,7 @@ import java.awt.Frame
 import java.io.File
 import java.net.URI
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -31,6 +32,65 @@ private val VT_FILE_URL = "https://www.virustotal.com/gui/file/"
  * back into the store. The reducer is never called directly here —
  * only `dispatch()` is used to emit intents.
  */
+
+/**
+ * Selects which files a `force` recheck command targets. Pure + testable
+ * (the live VT API never runs here). [error] is non-null when the cutoff date
+ * can't be parsed — the caller surfaces it instead of silently re-checking everything.
+ *
+ * ponytail: two failure modes fixed here.
+ *  1. "force-older <date>" and "force older <date>" normalize to the same args
+ *     (removePrefix("force") on the hyphen form leaves a leading '-', stripped here).
+ *  2. Dates are compared as EPOCHS, not strings. The old `date < dateStr` made
+ *     every "20xx-..." stored date sort before "28-07-26" (char '0' < '8') and
+ *     re-checked everything. Accepts the documented YYYY-MM-DD (and YYYY-MM-DD HH:mm);
+ *     anything else returns an error so it can't misfire silently.
+ */
+internal data class ForceRecheckSelection(val targets: List<FileEntry>, val error: String?)
+
+internal fun parseForceRecheckTargets(command: String, files: List<FileEntry>): ForceRecheckSelection {
+    val args = command.removePrefix("force").trim().removePrefix("-").trim()
+    return when {
+        args.isBlank() -> ForceRecheckSelection(files.filter { it.md5Hash != null }, null)
+        args.startsWith("older ") -> {
+            val dateStr = args.removePrefix("older ").trim()
+            val cutoff = parseDateToEpoch(dateStr)
+            if (cutoff == null) {
+                ForceRecheckSelection(emptyList(), "Could not parse date '$dateStr'. Use YYYY-MM-DD (e.g. 2026-07-28).")
+            } else {
+                ForceRecheckSelection(
+                    files.filter { e ->
+                        e.md5Hash != null &&
+                        e.lastAnalysisDate != null &&
+                        (parseDateToEpoch(e.lastAnalysisDate!!)?.let { it < cutoff } ?: false)
+                    },
+                    null
+                )
+            }
+        }
+        else -> {
+            val hash = args.trim()
+            ForceRecheckSelection(files.filter { it.md5Hash == hash || it.sha256Hash == hash }, null)
+        }
+    }
+}
+
+/** Parses the stored/entered date formats to epoch seconds, or null if unparseable. */
+internal fun parseDateToEpoch(dateStr: String): Long? {
+    return try {
+        LocalDateTime.parse(dateStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+            .atZone(ZoneId.systemDefault()).toEpochSecond()
+    } catch (e: DateTimeParseException) {
+        try {
+            // Date-only: LocalDateTime.parse needs time fields, so parse as LocalDate
+            // and anchor at start of day. ("older than 2025-01-15" = before 2025-01-15 00:00.)
+            LocalDate.parse(dateStr, DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+                .atStartOfDay(ZoneId.systemDefault())
+                .toEpochSecond()
+        } catch (e2: Exception) { null }
+    }
+}
+
 class SideEffects(
     private val container: AppContainer,
     private val dispatch: (AppIntent) -> Unit,
@@ -902,18 +962,12 @@ class SideEffects(
             return
         }
 
-        val args = command.removePrefix("force").trim()
-        val targets = when {
-            args.isBlank() -> files.filter { it.md5Hash != null }
-            args.startsWith("older ") -> {
-                val dateStr = args.removePrefix("older ").trim()
-                files.filter { entry -> val date = entry.lastAnalysisDate; date != null && date < dateStr && entry.md5Hash != null }
-            }
-            else -> {
-                val hash = args.trim()
-                files.filter { it.md5Hash == hash || it.sha256Hash == hash }
-            }
+        val selection = parseForceRecheckTargets(command, files)
+        if (selection.error != null) {
+            dispatch(AppIntent.LogMessage(selection.error))
+            return
         }
+        val targets = selection.targets
 
         if (targets.isEmpty()) {
             dispatch(AppIntent.LogMessage("No files to recheck."))
@@ -941,7 +995,7 @@ class SideEffects(
                 container.pendingRecheckTracker.addPending(
                     entry.path,
                     md5 ?: "",
-                    entry.lastAnalysisDate?.let { parseDateToEpochSeconds(it) }
+                    entry.lastAnalysisDate?.let { parseDateToEpoch(it) }
                 )
                 dispatch(AppIntent.FileProcessed(entry.path, entry.copy(
                     status = FileStatus.QUEUED_FOR_RECHECK
@@ -1199,18 +1253,6 @@ class SideEffects(
             ).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
         } catch (e: Exception) {
             epochSeconds.toString()
-        }
-    }
-
-    private fun parseDateToEpochSeconds(dateStr: String): Long? {
-        return try {
-            LocalDateTime.parse(dateStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
-                .atZone(ZoneId.systemDefault()).toEpochSecond()
-        } catch (e: DateTimeParseException) {
-            try {
-                LocalDateTime.parse(dateStr, DateTimeFormatter.ofPattern("yyyy-MM-dd"))
-                    .atZone(ZoneId.systemDefault()).toEpochSecond()
-            } catch (e2: Exception) { null }
         }
     }
 
