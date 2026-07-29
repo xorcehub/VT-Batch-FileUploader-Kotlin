@@ -54,7 +54,12 @@ fun createApi(key: String?, out: OutputFormatter, command: String): VirusTotalAp
         out.error(command, "No API key provided. Use --api-key or set VT_API_KEY.", "ConfigurationError", ExitCodes.AUTH_ERROR)
         return null
     }
-    return VirusTotalApi(key)
+    // Wire the rate limiter so the batch paths (check/upload/scan --hash/reanalyze)
+    // respect VT's per-minute cap. Without this the CLI fires unthrottled and
+    // burns the free-tier 20 req/min limit -> 429s (which validate even
+    // mis-reports as a bad key — see VirusTotalApi.validateCredentials).
+    val config = AppConfig.default
+    return VirusTotalApi(key, RateLimiter(config.rateLimitPerMinute), config)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
