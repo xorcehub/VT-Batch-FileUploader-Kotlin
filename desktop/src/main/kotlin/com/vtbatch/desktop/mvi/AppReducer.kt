@@ -188,6 +188,11 @@ object AppReducer {
             files = state.files.updateByPath(intent.path) { intent.updatedEntry }
         )
 
+        is AppIntent.SetFileStatus -> state.copy(
+            // Merge, not replace: keep all existing VT data, flip only the status.
+            files = state.files.updateByPath(intent.path) { it.copy(status = intent.status) }
+        )
+
         is AppIntent.CurrentProcessingChanged -> state.copy(
             currentFile = intent.file,
             currentStatus = intent.status

@@ -177,6 +177,44 @@ class AppReducerTest {
         assertEquals(FileStatus.PENDING, result.files[1].status) // unchanged
     }
 
+    // W8 regression: flipping a row to RECHECKING must NOT wipe its VT data.
+    // The pollRechecks loop previously dispatched a bare FileEntry + FileProcessed
+    // (full replace), discarding detection ratio, SHA-256, URL, tags and engine
+    // hits for the whole recheck window. SetFileStatus must merge via copy().
+    @Test
+    fun `SetFileStatus flips status while preserving all other VT data`() {
+        val entry = FileEntry(
+            path = "test.exe", fileName = "test.exe", fileSizeBytes = 100,
+            fileSizeFormatted = "100 B", md5Hash = "abc", sha256Hash = "sha",
+            status = FileStatus.QUEUED_FOR_RECHECK, detectionRatio = "45/72",
+            analysisUrl = "https://www.virustotal.com/gui/file/sha",
+            popularThreatLabel = "trojan",
+            tags = listOf("executable", "windows"),
+            engineHits = listOf(EngineHit("Kaspersky", "Trojan.Win32.Generic"))
+        )
+        val state = initialState.copy(files = listOf(entry))
+
+        val result = reducer.reduce(state, AppIntent.SetFileStatus("test.exe", FileStatus.RECHECKING))
+
+        assertEquals(FileStatus.RECHECKING, result.files[0].status)
+        assertEquals("45/72", result.files[0].detectionRatio)
+        assertEquals("sha", result.files[0].sha256Hash)
+        assertEquals("https://www.virustotal.com/gui/file/sha", result.files[0].analysisUrl)
+        assertEquals("trojan", result.files[0].popularThreatLabel)
+        assertEquals(listOf("executable", "windows"), result.files[0].tags)
+        assertEquals(1, result.files[0].engineHits?.size)
+    }
+
+    @Test
+    fun `SetFileStatus is a no-op for an unknown path`() {
+        val state = initialState.copy(files = listOf(
+            FileEntry(path = "a.exe", fileName = "a.exe", fileSizeBytes = 1, fileSizeFormatted = "1 B")
+        ))
+        val result = reducer.reduce(state, AppIntent.SetFileStatus("missing.exe", FileStatus.RECHECKING))
+        assertEquals(1, result.files.size)
+        assertEquals(FileStatus.PENDING, result.files[0].status)
+    }
+
     @Test
     fun `FileUploaded updates status to UPLOADED_AWAITING`() {
         val entry = FileEntry(path = "test.exe", fileName = "test.exe", fileSizeBytes = 100,

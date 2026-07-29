@@ -82,6 +82,11 @@ sealed class AppIntent {
     /** A single file was hash-checked against VT */
     data class FileProcessed(val path: String, val updatedEntry: FileEntry) : AppIntent()
 
+    /** Change only a row's status, preserving every other field (detection ratio,
+     *  SHA-256, URL, tags, engine hits, ...). Unlike [FileProcessed], whose reducer
+     *  replaces the whole entry, the reducer for this intent merges via copy(). */
+    data class SetFileStatus(val path: String, val status: FileStatus) : AppIntent()
+
     /** Current file being processed changed (for the "Currently Processing" display) */
     data class CurrentProcessingChanged(val file: String?, val status: String?) : AppIntent()
 

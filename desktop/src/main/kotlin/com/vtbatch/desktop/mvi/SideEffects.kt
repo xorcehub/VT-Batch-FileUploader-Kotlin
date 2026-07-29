@@ -1055,17 +1055,13 @@ class SideEffects(
         dispatch(AppIntent.LogMessage("Polling recheck results for ${pending.size} file(s)..."))
 
         for (recheck in pending) {
-            // Mark as actively rechecking so UI shows the correct state
-            val recheckFile = File(recheck.filePath)
-            val recheckingEntry = FileEntry(
-                path = recheck.filePath,
-                fileName = recheckFile.name,
-                fileSizeBytes = if (recheckFile.exists()) recheckFile.length() else 0L,
-                fileSizeFormatted = if (recheckFile.exists()) formatFileSize(recheckFile.length()) else "?",
-                md5Hash = recheck.md5Hash,
-                status = FileStatus.RECHECKING
-            )
-            dispatch(AppIntent.FileProcessed(recheck.filePath, recheckingEntry))
+            // Flip to RECHECKING WITHOUT discarding the row's existing VT data
+            // (detection ratio, SHA-256, URL, tags, engine hits). The old code built
+            // a bare FileEntry and dispatched FileProcessed, whose reducer does a full
+            // replace — wiping everything for the whole recheck window, and permanently
+            // if the recheck never completes (this loop has no max-rounds). SetFileStatus
+            // merges via copy(), matching requestReanalysisFor's QUEUED_FOR_RECHECK flip.
+            dispatch(AppIntent.SetFileStatus(recheck.filePath, FileStatus.RECHECKING))
             try {
                 val result = withContext(Dispatchers.IO) {
                     api.checkFileOnVirusTotal(recheck.md5Hash)
