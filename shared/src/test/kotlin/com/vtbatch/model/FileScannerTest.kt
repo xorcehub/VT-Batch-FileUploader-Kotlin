@@ -1,5 +1,9 @@
 package com.vtbatch.model
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import java.io.File
 import java.nio.file.Files
 import kotlin.io.path.createTempDirectory
@@ -178,5 +182,53 @@ class FileScannerTest {
         val results = scanner.getSuspiciousFiles(tmpDir.absolutePath)
 
         assertEquals(4, results.size)  // .exe + ELF + Mach-O + shebang
+    }
+
+    // ── Truncation (C2) ──────────────────────────────────────────────────
+
+    /** Attach a capturing appender to the root logger for the duration of [block]. */
+    private fun captureWarns(block: () -> Unit): List<ILoggingEvent> {
+        val appender = ListAppender<ILoggingEvent>()
+        val root = org.slf4j.LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
+        root.addAppender(appender)
+        appender.start()
+        try {
+            block()
+        } finally {
+            root.detachAppender(appender)
+        }
+        return appender.list
+    }
+
+    @Test
+    fun `truncates at maxFiles and warns when more suspicious files exist`() {
+        // Isolated dir: the class-level tmpDir is shared across tests, and several
+        // other tests create *.exe files in it, so scanning it here would be
+        // order-dependent. 5 .exe files, maxFiles = 3 -> truncated, must warn.
+        val dir = createTempDirectory("filescanner-trunc").toFile().apply { deleteOnExit() }
+        repeat(5) { i -> File(dir, "malware$i.exe").writeText("payload") }
+
+        val scanner = FileScanner(setOf(".exe"), maxFiles = 3)
+        var results: List<String> = emptyList()
+        val observed = captureWarns { results = scanner.getSuspiciousFiles(dir.absolutePath) }
+
+        assertEquals(3, results.size)
+        assertTrue(observed.any {
+            it.level == Level.WARN && it.formattedMessage.contains("Truncated scan at maxFiles=3")
+        }, "Expected a truncation warning. Got: ${observed.map { it.formattedMessage }}")
+    }
+
+    @Test
+    fun `does not warn when suspicious file count is exactly at the limit`() {
+        val dir = createTempDirectory("filescanner-exact").toFile().apply { deleteOnExit() }
+        repeat(3) { i -> File(dir, "malware$i.exe").writeText("payload") }
+        val scanner = FileScanner(setOf(".exe"), maxFiles = 3)
+
+        val observed = captureWarns { scanner.getSuspiciousFiles(dir.absolutePath) }
+
+        // Exactly maxFiles matches -> no truncation, no warn.
+        assertFalse(observed.any {
+            it.level == Level.WARN && it.formattedMessage.contains("Truncated scan")
+        }, "Should not warn when count == maxFiles. Got: ${observed.map { it.formattedMessage }}")
     }
 }

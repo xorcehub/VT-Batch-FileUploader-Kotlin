@@ -46,4 +46,8 @@ dependencies {
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.ktor.client.mock)
+    // Logback binding so tests can assert log output (e.g. FileScanner truncation
+    // warning) via a ListAppender. Production builds get their binding from the
+    // cli/desktop modules; without this, shared's slf4j logs are no-op at test time.
+    testImplementation(libs.logback.classic)
 }

@@ -72,12 +72,19 @@ class FileScanner(
                 }
                 Files.isDirectory(resolved) -> {
                     Files.walk(resolved, maxDepth, FileVisitOption.FOLLOW_LINKS).use { stream ->
-                        stream.filter { it.isRegularFile() }
+                        // Take one extra match to detect whether we hit the limit, then
+                        // warn and drop it — without materializing the entire match set
+                        // (a dir can hold far more suspicious files than maxFiles).
+                        val matched = stream.filter { it.isRegularFile() }
                             .filter { !Files.isHidden(it) }
                             .filter { isSuspicious(it) }
-                            .limit(maxFiles.toLong())
                             .map { it.toString() }
+                            .limit((maxFiles + 1).toLong())
                             .toList()
+                        if (matched.size > maxFiles) {
+                            logger.warn { "Truncated scan at maxFiles=$maxFiles for $path — MORE suspicious files exist beyond this limit." }
+                        }
+                        matched.take(maxFiles)
                     }
                 }
                 else -> emptyList()
