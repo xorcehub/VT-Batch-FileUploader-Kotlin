@@ -974,9 +974,43 @@ class SideEffects(
             return
         }
 
+        requestReanalysisFor(targets)
+    }
+
+    /**
+     * Recheck a single file from its row button: request fresh re-analysis on VT
+     * and queue it for polling. Reuses the same path as the `force` command.
+     */
+    fun recheckFile(entry: FileEntry) {
+        scope.launch {
+            if (container.virusTotalApi == null) {
+                dispatch(AppIntent.Error("No API key configured."))
+                return@launch
+            }
+            if (entry.md5Hash == null && entry.sha256Hash == null) {
+                dispatch(AppIntent.LogMessage("Cannot recheck ${entry.fileName}: no hash available."))
+                return@launch
+            }
+            requestReanalysisFor(listOf(entry))
+        }
+    }
+
+    /** Shared core of `force` and the per-row Recheck button: request re-analysis,
+     *  track pending, and start the poll timer. Caller pre-validates API key. */
+    private suspend fun requestReanalysisFor(targets: List<FileEntry>) {
+        val api = container.virusTotalApi ?: return
         dispatch(AppIntent.LogMessage("Requesting re-analysis for ${targets.size} file(s)..."))
 
         for (entry in targets) {
+            // Flip to QUEUED before any network call so the row's Recheck button
+            // disables (spinner) immediately. Otherwise the user can re-fire during
+            // the SHA-256 lookup / requestReanalysis round-trip and VT returns 409
+            // for the duplicate reanalyse request. entry.copy keeps all existing VT
+            // data (detection ratio, URL, engine hits) intact during recheck.
+            dispatch(AppIntent.FileProcessed(entry.path, entry.copy(
+                status = FileStatus.QUEUED_FOR_RECHECK
+            )))
+
             val md5 = entry.md5Hash
             var sha256 = entry.sha256Hash
             try {
@@ -997,10 +1031,10 @@ class SideEffects(
                     md5 ?: "",
                     entry.lastAnalysisDate?.let { parseDateToEpoch(it) }
                 )
-                dispatch(AppIntent.FileProcessed(entry.path, entry.copy(
-                    status = FileStatus.QUEUED_FOR_RECHECK
-                )))
             } catch (e: Exception) {
+                // Revert the optimistic QUEUED state so the row isn't stuck spinning.
+                // entry.copy(status = entry.status) restores the original status AND data.
+                dispatch(AppIntent.FileProcessed(entry.path, entry.copy(status = entry.status)))
                 dispatch(AppIntent.LogMessage("  Error requesting recheck for ${entry.fileName} (hash=${sha256 ?: md5}): ${e.message}"))
             }
         }

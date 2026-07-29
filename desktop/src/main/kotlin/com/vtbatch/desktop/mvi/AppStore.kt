@@ -92,6 +92,12 @@ class AppStore(
                 container.pauseController.toggle()
             }
 
+            is AppIntent.RecheckFile -> {
+                state.files.find { it.path == intent.path }?.let { entry ->
+                    sideEffects.recheckFile(entry)
+                }
+            }
+
             else -> {
                 // No side effect needed — pure state change
                 // (FindFiles, NavigateMatches, error/result intents, etc.)
