@@ -30,8 +30,12 @@ class RateLimiter(
      * Acquire permission to make a request, suspending if needed.
      * Returns the time waited in seconds.
      *
-     * The entire wait-compute-record cycle is serialized through the mutex
-     * to prevent concurrent coroutines from exceeding the rate limit.
+     * Wait is computed and the request recorded under the mutex, but the
+     * suspension itself happens WITHOUT holding it. This is deliberate: we
+     * must never acquire a suspending Mutex inside a `finally` — if the
+     * coroutine is cancelled during [delay], a `mutex.lock()` there throws
+     * CancellationException, and `withLock`'s own finally then `unlock()`s a
+     * mutex we no longer hold -> IllegalStateException("Mutex is not locked").
      */
     suspend fun acquire(): Double {
         // Wait if paused
@@ -41,39 +45,40 @@ class RateLimiter(
             }
         }
 
-        return mutex.withLock {
-            val now = currentTime()
-            var wait = 0.0
-
-            val timeSinceLast = now - lastRequestTime
-            if (timeSinceLast < minIntervalSec) wait = minIntervalSec - timeSinceLast
-
-            val cutoff = now - 60.0
-            while (requestTimes.isNotEmpty() && requestTimes.first() < cutoff) {
-                requestTimes.removeFirst()
-            }
-
-            if (requestTimes.size >= requestsPerMinute) {
-                val oldest = requestTimes.first()
-                val additionalWait = (oldest + 60.0) - now
-                if (additionalWait > 0) wait = maxOf(wait, additionalWait)
-            }
-
-            if (wait > 0) {
-                mutex.unlock()
-                try {
-                    logger.debug { "Rate limiter: waiting ${"%.2f".format(wait)}s" }
-                    delay((wait * 1000).toLong())
-                } finally {
-                    mutex.lock()
-                }
-            }
-
-            lastRequestTime = currentTime()
-            requestTimes.addLast(lastRequestTime)
-
-            wait
+        val wait = mutex.withLock { computeWaitSeconds() }
+        if (wait > 0) {
+            logger.debug { "Rate limiter: waiting ${"%.2f".format(wait)}s" }
+            delay((wait * 1000).toLong())
         }
+        mutex.withLock { recordRequest() }
+        return wait
+    }
+
+    /** Prune expired entries and return how long (seconds) this caller must wait. */
+    private fun computeWaitSeconds(): Double {
+        val now = currentTime()
+        var wait = 0.0
+
+        val timeSinceLast = now - lastRequestTime
+        if (timeSinceLast < minIntervalSec) wait = minIntervalSec - timeSinceLast
+
+        val cutoff = now - 60.0
+        while (requestTimes.isNotEmpty() && requestTimes.first() < cutoff) {
+            requestTimes.removeFirst()
+        }
+
+        if (requestTimes.size >= requestsPerMinute) {
+            val oldest = requestTimes.first()
+            val additionalWait = (oldest + 60.0) - now
+            if (additionalWait > 0) wait = maxOf(wait, additionalWait)
+        }
+        return wait
+    }
+
+    /** Record this request's timestamp against the sliding window. */
+    private fun recordRequest() {
+        lastRequestTime = currentTime()
+        requestTimes.addLast(lastRequestTime)
     }
 
     /** Try to acquire without waiting. Returns true if allowed. */
