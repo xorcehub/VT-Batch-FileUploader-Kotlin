@@ -356,6 +356,10 @@ class SideEffects(
             var processed = 0
             var totalBytesProcessed = 0L
             val startTime = System.currentTimeMillis()
+            // Per-pass cache batch: accumulated through the loop and flushed once via
+            // saveEntries (one atomic read-modify-write) instead of saveEntry-per-file
+            // (which did a full load + full rewrite per file -> O(n^2) I/O).
+            val cacheBatch = mutableMapOf<String, QuotaManager.CacheEntry>()
 
             for (entry in toProcess) {
                 // Check pause
@@ -376,10 +380,8 @@ class SideEffects(
                         val sha256 = VTResponseParser.extractSha256(vtResult)
                         val details = VTResponseParser.extractFileDetails(vtResult)
 
-                        // Save to cache
-                        withContext(Dispatchers.IO) {
-                            container.quotaManager.saveEntry(entry.md5Hash!!, buildCacheEntry(entry, sha256, lastDate, stats, details))
-                        }
+                        // Stage to the per-pass batch — flushed once after the loop.
+                        cacheBatch[entry.md5Hash!!] = buildCacheEntry(entry, sha256, lastDate, stats, details)
 
                         entry.copy(
                             status = FileStatus.HASHED_FOUND,
@@ -389,16 +391,15 @@ class SideEffects(
                             lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
                         ).withDetails(details)
                     } else {
-                        // Not found on VT — cache this so we don't burn quota re-checking
-                        withContext(Dispatchers.IO) {
-                            container.quotaManager.saveEntry(entry.md5Hash!!, QuotaManager.CacheEntry(
-                                filename = entry.fileName,
-                                size = entry.fileSizeBytes,
-                                path = entry.path,
-                                lastScan = java.time.LocalDateTime.now().toString(),
-                                status = "HASHED_NOT_FOUND"
-                            ))
-                        }
+                        // Not found on VT — stage to the batch so we don't burn quota
+                        // re-checking this hash on the next run.
+                        cacheBatch[entry.md5Hash!!] = QuotaManager.CacheEntry(
+                            filename = entry.fileName,
+                            size = entry.fileSizeBytes,
+                            path = entry.path,
+                            lastScan = java.time.LocalDateTime.now().toString(),
+                            status = "HASHED_NOT_FOUND"
+                        )
                         entry.copy(status = FileStatus.HASHED_NOT_FOUND)
                     }
 
@@ -436,6 +437,13 @@ class SideEffects(
                     fileCount = processed,
                     elapsedFormatted = String.format("%.1fs", elapsed)
                 ))
+            }
+
+            // Flush the whole pass's cache entries in one atomic read-modify-write.
+            // Previously this was a saveEntry() per file -> O(n^2) full-file rewrites,
+            // and a torn read could transiently miss a cache hit (-> wasted quota).
+            withContext(Dispatchers.IO) {
+                if (cacheBatch.isNotEmpty()) container.quotaManager.saveEntries(cacheBatch)
             }
 
             dispatch(AppIntent.CurrentProcessingChanged(null, null))

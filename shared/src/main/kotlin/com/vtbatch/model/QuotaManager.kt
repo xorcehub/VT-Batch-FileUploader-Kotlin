@@ -86,6 +86,31 @@ class QuotaManager(
         return true
     }
 
+    /**
+     * Write [text] to the cache atomically: a sibling `.tmp` file is written, then
+     * atomically moved over the target. A concurrent [loadData]/[loadRaw] (which does
+     * NOT take [writeMutex]) therefore reads either the previous complete file or the
+     * new complete file — never a half-written one. Without this, [writeText] could be
+     * observed mid-write; loadRaw() catches the parse failure and returns emptyMap(),
+     * so a read racing a write transiently returned ZERO entries — missing a real
+     * cache hit and triggering a redundant (quota-burning) VT query.
+     */
+    private fun writeAtomically(text: String) {
+        val tmp = cacheFile.resolveSibling("${cacheFile.name}.tmp")
+        tmp.writeText(text)
+        try {
+            java.nio.file.Files.move(
+                tmp.toPath(),
+                cacheFile.toPath(),
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING
+            )
+        } catch (e: Exception) {
+            tmp.delete()
+            throw e
+        }
+    }
+
     /** Save file statuses to cache (guarded by mutex to prevent concurrent clobbering) */
     suspend fun saveData(fileStatuses: Map<String, Map<String, Any?>>): Boolean {
         return writeMutex.withLock {
@@ -108,7 +133,7 @@ class QuotaManager(
 
                 if (!checkDiskSpace()) throw CacheError("Insufficient disk space to write cache (${cacheFile.parent})")
 
-                cacheFile.writeText(json.encodeToString(
+                writeAtomically(json.encodeToString(
                     serializer = kotlinx.serialization.serializer<Map<String, CacheEntry>>(),
                     value = existing
                 ))
@@ -125,19 +150,28 @@ class QuotaManager(
         }
     }
 
-    /** Save a single entry (guarded by mutex to prevent concurrent clobbering) */
-    suspend fun saveEntry(hashId: String, entry: CacheEntry): Boolean {
+    /** Save a single entry. Delegates to [saveEntries] (one entry -> one write). */
+    suspend fun saveEntry(hashId: String, entry: CacheEntry): Boolean =
+        saveEntries(mapOf(hashId to entry))
+
+    /**
+     * Save multiple entries in a single read-modify-write. Use this when persisting a
+     * batch (e.g. one scan pass) — [saveEntry] does a full load + full rewrite per call,
+     * which is O(n^2) in total I/O over a large batch.
+     */
+    suspend fun saveEntries(entries: Map<String, CacheEntry>): Boolean {
+        if (entries.isEmpty()) return true
         return writeMutex.withLock {
             try {
                 val existing = loadRaw().toMutableMap()
-                existing[hashId] = entry
+                existing.putAll(entries)
 
                 if (!checkDiskSpace()) {
                     logger.error { "Insufficient disk space to write cache (${cacheFile.parent})" }
                     throw CacheError("Insufficient disk space to write cache (${cacheFile.parent})")
                 }
 
-                cacheFile.writeText(json.encodeToString(
+                writeAtomically(json.encodeToString(
                     serializer = kotlinx.serialization.serializer<Map<String, CacheEntry>>(),
                     value = existing
                 ))
@@ -148,8 +182,8 @@ class QuotaManager(
             } catch (e: CacheError) {
                 throw e
             } catch (e: Exception) {
-                logger.error { "Error saving entry: $e" }
-                throw CacheError("Error saving entry: ${e.message}")
+                logger.error { "Error saving entries: $e" }
+                throw CacheError("Error saving entries: ${e.message}")
             }
         }
     }
@@ -163,7 +197,7 @@ class QuotaManager(
                     throw CacheError("Insufficient disk space to write cache (${cacheFile.parent})")
                 }
 
-                cacheFile.writeText("{}")
+                writeAtomically("{}")
                 true
             } catch (e: IOException) {
                 logger.error { "I/O error clearing cache: $e" }

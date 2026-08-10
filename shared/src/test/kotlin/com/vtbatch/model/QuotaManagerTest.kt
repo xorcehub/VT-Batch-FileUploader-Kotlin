@@ -8,6 +8,7 @@ import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -166,6 +167,79 @@ class QuotaManagerTest {
         val loaded = manager.loadData()
         assertEquals(1, loaded.size)
         assertEquals("new.exe", loaded["hash1"]?.filename)
+    }
+
+    // W5: saveEntries persists a batch in a single read-modify-write and round-trips.
+    @Test
+    fun `saveEntries persists a batch in one write`() {
+        val (manager, _) = tempQuotaManager()
+        val now = LocalDateTime.now().toString()
+        val batch = mapOf(
+            "hash1" to QuotaManager.CacheEntry(filename = "a.exe", lastScan = now),
+            "hash2" to QuotaManager.CacheEntry(filename = "b.exe", lastScan = now),
+            "hash3" to QuotaManager.CacheEntry(filename = "c.exe", lastScan = now)
+        )
+
+        assertTrue(runBlocking { manager.saveEntries(batch) })
+
+        val loaded = manager.loadData()
+        assertEquals(3, loaded.size)
+        assertEquals("a.exe", loaded["hash1"]?.filename)
+        assertEquals("b.exe", loaded["hash2"]?.filename)
+        assertEquals("c.exe", loaded["hash3"]?.filename)
+    }
+
+    @Test
+    fun `saveEntries merges with existing entries`() {
+        val (manager, _) = tempQuotaManager()
+        val now = LocalDateTime.now().toString()
+        runBlocking { manager.saveEntry("existing", QuotaManager.CacheEntry(filename = "old.exe", lastScan = now)) }
+
+        runBlocking { manager.saveEntries(mapOf(
+            "new1" to QuotaManager.CacheEntry(filename = "n1.exe", lastScan = now),
+            "new2" to QuotaManager.CacheEntry(filename = "n2.exe", lastScan = now)
+        )) }
+
+        val loaded = manager.loadData()
+        assertEquals(3, loaded.size, "saveEntries must merge, not replace, the existing entries")
+        assertNotNull(loaded["existing"])
+    }
+
+    @Test
+    fun `saveEntries on empty map is a no-op`() {
+        val (manager, file) = tempQuotaManager()
+        // An empty file exists from tempQuotaManager; empty batch must not throw or rewrite.
+        assertTrue(runBlocking { manager.saveEntries(emptyMap()) })
+        assertTrue(manager.loadData().isEmpty())
+    }
+
+    // W9: writes go through temp-file + atomic move. After a write the cache file is
+    // valid (round-trips) and no .tmp sibling lingers.
+    @Test
+    fun `atomic write leaves no tmp file and produces a valid cache`() {
+        val (manager, file) = tempQuotaManager()
+        val now = LocalDateTime.now().toString()
+        runBlocking { manager.saveEntries(mapOf(
+            "h1" to QuotaManager.CacheEntry(filename = "x.exe", lastScan = now)
+        )) }
+
+        val tmp = File(file.parentFile, "${file.name}.tmp")
+        assertFalse(tmp.exists(), ".tmp sibling must be cleaned up after the atomic move")
+        // The target file must hold valid, complete JSON (not a torn write).
+        assertEquals(1, manager.loadData().size)
+    }
+
+    @Test
+    fun `saveEntry still works after delegating to saveEntries`() {
+        // Regression guard: saveEntry now delegates to saveEntries(mapOf(...)). Confirm
+        // the single-entry path still round-trips and overwrites.
+        val (manager, _) = tempQuotaManager()
+        val now = LocalDateTime.now().toString()
+        assertTrue(runBlocking { manager.saveEntry("h", QuotaManager.CacheEntry(filename = "a.exe", lastScan = now)) })
+        assertTrue(runBlocking { manager.saveEntry("h", QuotaManager.CacheEntry(filename = "b.exe", lastScan = now)) })
+        val loaded = manager.loadData()
+        assertEquals(1, loaded.size)
+        assertEquals("b.exe", loaded["h"]?.filename)
     }
 
     // --- Regression tests for timestamp format mismatch bug ---
