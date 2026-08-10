@@ -139,6 +139,22 @@ class AppReducerTest {
         assertFalse(result.hasCredentials)
     }
 
+    // C1 follow-up / W8-adjacent: a transient validation error (rate limit / server
+    // error) must NOT clear hasCredentials for an already-valid key, nor mislabel it
+    // invalid. It stops the spinner and re-shows the dialog for retry. Regression for
+    // the bug where a 429 during re-validation (incl. startup auto-validation of a
+    // saved key) cleared a working key's state.
+    @Test
+    fun `CredentialsValidationTransientError preserves hasCredentials and stops spinner`() {
+        val state = initialState.copy(hasCredentials = true, isValidatingCredentials = true)
+        val result = reducer.reduce(state, AppIntent.CredentialsValidationTransientError("rate limited"))
+
+        assertTrue(result.hasCredentials, "hasCredentials must be preserved on a transient error")
+        assertFalse(result.isValidatingCredentials, "spinner must stop")
+        assertTrue(result.showCredentialDialog, "dialog re-shows for retry")
+        assertTrue(result.statusLog.last().contains("rate limited"))
+    }
+
     // ── Async Results ───────────────────────────────────────────────
 
     @Test

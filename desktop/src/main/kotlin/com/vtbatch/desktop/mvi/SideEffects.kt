@@ -677,6 +677,21 @@ class SideEffects(
                 dispatch(AppIntent.CredentialsInvalid("Connection timed out. VirusTotal servers may be down or your network is unreachable."))
             } catch (e: java.net.UnknownHostException) {
                 dispatch(AppIntent.CredentialsInvalid("Cannot resolve VirusTotal hostname. Check your internet connection."))
+            } catch (e: APIRateLimitError) {
+                // Transient: VT throttled the check — the key may still be valid. Do not
+                // report it as invalid (the C1 bug: a 429 was landing in the generic arm
+                // below and dispatching CredentialsInvalid, clearing hasCredentials and
+                // popping the credential dialog for a working key — worst on startup,
+                // which auto-validates a saved key via Main.kt).
+                val wait = e.retryAfter?.let { " Retry in ${it.toInt()}s." } ?: ""
+                dispatch(AppIntent.CredentialsValidationTransientError(
+                    "VirusTotal rate-limited the credential check.$wait Your key may still be valid — please retry."
+                ))
+            } catch (e: APIResponseError) {
+                // Transient server/HTTP error during validation — not evidence of a bad key.
+                dispatch(AppIntent.CredentialsValidationTransientError(
+                    "Could not validate key (HTTP ${e.statusCode ?: 0}). VirusTotal may be unavailable — please retry."
+                ))
             } catch (e: Exception) {
                 dispatch(AppIntent.CredentialsInvalid("Validation failed: ${e.message}"))
             }

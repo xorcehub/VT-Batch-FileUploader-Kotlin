@@ -145,6 +145,12 @@ sealed class AppIntent {
     /** Credentials failed validation */
     data class CredentialsInvalid(val message: String) : AppIntent()
 
+    /** Validation could not reach a verdict due to a transient error (rate limit / server
+     *  error). Unlike [CredentialsInvalid], the key may still be valid, so the reducer
+     *  preserves [AppState.hasCredentials] and just stops the spinner + re-shows the
+     *  dialog so the user can retry. */
+    data class CredentialsValidationTransientError(val message: String) : AppIntent()
+
     /** Bulk file list update (e.g. after force recheck, remove-green, etc.) */
     data class FilesUpdated(val files: List<FileEntry>) : AppIntent()
 
