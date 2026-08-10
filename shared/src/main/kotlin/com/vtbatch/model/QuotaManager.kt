@@ -97,8 +97,8 @@ class QuotaManager(
      */
     private fun writeAtomically(text: String) {
         val tmp = cacheFile.resolveSibling("${cacheFile.name}.tmp")
-        tmp.writeText(text)
         try {
+            tmp.writeText(text)
             java.nio.file.Files.move(
                 tmp.toPath(),
                 cacheFile.toPath(),

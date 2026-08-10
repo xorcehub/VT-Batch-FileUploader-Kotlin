@@ -208,13 +208,21 @@ class QuotaManagerTest {
     @Test
     fun `saveEntries on empty map is a no-op`() {
         val (manager, file) = tempQuotaManager()
-        // An empty file exists from tempQuotaManager; empty batch must not throw or rewrite.
+        // Empty batch must return true and leave the cache empty without throwing.
+        // (Whether it skips the write entirely is not observable here — rewriting an
+        // already-empty file leaves loadData() empty either way — so we assert only
+        // the observable contract: true return + empty result.)
         assertTrue(runBlocking { manager.saveEntries(emptyMap()) })
         assertTrue(manager.loadData().isEmpty())
     }
 
-    // W9: writes go through temp-file + atomic move. After a write the cache file is
-    // valid (round-trips) and no .tmp sibling lingers.
+    // W9 mechanism guard (forward-looking): after a write the cache file is valid
+    // (round-trips) and no .tmp sibling lingers. Note this does NOT detect the
+    // original W9 torn-read bug — the old writeText code never created a tmp, so this
+    // assertion would pass there too. It guards the NEW mechanism's cleanup invariant:
+    // if a future change breaks writeAtomically to leak a tmp, this catches it. The
+    // torn-read atomicity guarantee itself is verified by construction (temp+move),
+    // not unit-testable without concurrency instrumentation.
     @Test
     fun `atomic write leaves no tmp file and produces a valid cache`() {
         val (manager, file) = tempQuotaManager()

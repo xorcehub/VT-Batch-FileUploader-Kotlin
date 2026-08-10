@@ -279,6 +279,11 @@ class SideEffects(
         val api = container.virusTotalApi ?: return
         dispatch(AppIntent.LogMessage("Refreshing ${stale.size} stale cache entry(ies)..."))
 
+        // Per-pass cache batch: accumulated through the loop and flushed once via
+        // saveEntries (one atomic read-modify-write) instead of saveEntry-per-file
+        // (which did a full load + full rewrite per file -> O(n^2) I/O).
+        val cacheBatch = mutableMapOf<String, QuotaManager.CacheEntry>()
+
         for (entry in stale) {
             val hash = entry.md5Hash ?: continue
             try {
@@ -292,10 +297,8 @@ class SideEffects(
                     val lastDate = VTResponseParser.extractLastAnalysisDate(result)
                     val details = VTResponseParser.extractFileDetails(result)
 
-                    // Update cache
-                    withContext(Dispatchers.IO) {
-                        container.quotaManager.saveEntry(hash, buildCacheEntry(entry, sha256, lastDate, stats, details))
-                    }
+                    // Stage to the per-pass batch — flushed once after the loop.
+                    cacheBatch[hash] = buildCacheEntry(entry, sha256, lastDate, stats, details)
 
                     entry.copy(
                         status = FileStatus.HASHED_FOUND,
@@ -312,6 +315,11 @@ class SideEffects(
             } catch (e: Exception) {
                 logger.warn { "Auto-refresh failed for ${entry.fileName}: ${e.message}" }
             }
+        }
+
+        // Flush the whole pass's cache entries in one atomic read-modify-write.
+        withContext(Dispatchers.IO) {
+            if (cacheBatch.isNotEmpty()) container.quotaManager.saveEntries(cacheBatch)
         }
 
         dispatch(AppIntent.LogMessage("Stale cache refresh complete."))
@@ -934,6 +942,10 @@ class SideEffects(
 
         dispatch(AppIntent.LogMessage("Updating ${files.size} file(s)..."))
         val updated = mutableListOf<FileEntry>()
+        // Per-pass cache batch: accumulated through the loop and flushed once via
+        // saveEntries (one atomic read-modify-write) instead of saveEntry-per-file
+        // (which did a full load + full rewrite per file -> O(n^2) I/O).
+        val cacheBatch = mutableMapOf<String, QuotaManager.CacheEntry>()
 
         for (entry in files) {
             if (entry.md5Hash == null) {
@@ -961,10 +973,8 @@ class SideEffects(
                         lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
                     ).withDetails(details))
 
-                    // Persist to cache so re-drops get the fresh data
-                    withContext(Dispatchers.IO) {
-                        container.quotaManager.saveEntry(hash, buildCacheEntry(entry, sha256, lastDate, stats, details))
-                    }
+                    // Stage to the per-pass batch — flushed once after the loop.
+                    cacheBatch[hash] = buildCacheEntry(entry, sha256, lastDate, stats, details)
                 } else {
                     updated.add(entry.copy(status = FileStatus.HASHED_NOT_FOUND))
                 }
@@ -972,6 +982,11 @@ class SideEffects(
                 updated.add(entry)
                 dispatch(AppIntent.LogMessage("  Error updating ${entry.fileName}: ${e.message}"))
             }
+        }
+
+        // Flush the whole pass's cache entries in one atomic read-modify-write.
+        withContext(Dispatchers.IO) {
+            if (cacheBatch.isNotEmpty()) container.quotaManager.saveEntries(cacheBatch)
         }
 
         dispatch(AppIntent.FilesUpdated(updated))
