@@ -73,5 +73,30 @@ data class AppState(
     val showSettingsDialog: Boolean = false,
 
     /** Which fields are overridden by env vars */
-    val envOverriddenFields: Set<String> = emptySet()
-)
+    val envOverriddenFields: Set<String> = emptySet(),
+
+    // ── Filter state ─────────────────────────────────────────────────
+    // All filters start "everything selected". A non-empty set means
+    // those items are HIDDEN. Empty = show all.
+
+    /** Extensions the user has deselected (hidden from the file list) */
+    val deselectedExtensions: Set<String> = emptySet(),
+
+    /** Color tags the user has deselected (hidden from the file list) */
+    val deselectedColorTags: Set<ColorTag> = emptySet()
+) {
+    /** Files visible after applying extension + color filters. */
+    fun filteredFiles(): List<FileEntry> = files.filter { file ->
+        val extMatch = deselectedExtensions.isEmpty() ||
+            extOfName(file.fileName) !in deselectedExtensions
+        val colorMatch = deselectedColorTags.isEmpty() ||
+            file.colorTag !in deselectedColorTags
+        extMatch && colorMatch
+    }
+}
+
+/** Extract ".ext" from a filename. Returns "(none)" for extensionless files. */
+internal fun extOfName(fileName: String): String {
+    val dot = fileName.lastIndexOf('.')
+    return if (dot > 0 && dot < fileName.length - 1) fileName.substring(dot).lowercase() else "(none)"
+}

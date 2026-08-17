@@ -43,12 +43,14 @@ object AppReducer {
 
         is AppIntent.StartProcessing -> {
             // Align count with SideEffects.processFiles filter
-            val toProcess = state.files.count {
+            val visible = state.filteredFiles()
+            val toProcess = visible.count {
                 it.status == FileStatus.PENDING && it.md5Hash != null
             }
             if (toProcess == 0) {
                 state.copy(
-                    statusLog = state.statusLog.append("No files to process.")
+                    statusLog = state.statusLog.append("No files to process."),
+                    isProcessing = false
                 )
             } else {
                 state.copy(
@@ -73,7 +75,8 @@ object AppReducer {
         is AppIntent.DragExit -> state.copy(isDragOver = false)
 
         is AppIntent.UploadNewFiles -> {
-            val toUpload = state.files.count {
+            val visible = state.filteredFiles()
+            val toUpload = visible.count {
                 it.status == FileStatus.HASHED_NOT_FOUND && it.md5Hash != null
             }
             if (toUpload == 0) {
@@ -91,14 +94,14 @@ object AppReducer {
         }
 
         is AppIntent.OpenHashedFiles -> {
-            val withUrl = state.files.count { it.analysisUrl != null }
+            val withUrl = state.filteredFiles().count { it.analysisUrl != null }
             state.copy(
                 statusLog = state.statusLog.append("Opening $withUrl file(s) in browser...")
             )
         }
 
         is AppIntent.ExportFiles -> {
-            val count = state.files.size
+            val count = state.filteredFiles().size
             state.copy(
                 statusLog = if (count == 0) {
                     state.statusLog.append("Nothing to export — file list is empty.")
@@ -119,7 +122,9 @@ object AppReducer {
             currentStatus = null,
             statusLog = state.statusLog.append("File list cleared."),
             findMatches = FindNavigator.FindMatches(),
-            expandedFilePath = null
+            expandedFilePath = null,
+            deselectedExtensions = emptySet(),
+            deselectedColorTags = emptySet()
         )
 
         is AppIntent.ShowCredentialDialog -> state.copy(
@@ -141,7 +146,7 @@ object AppReducer {
             val matches = if (intent.term.isBlank()) {
                 FindNavigator.FindMatches()
             } else {
-                FindNavigator.search(intent.term, state.files)
+                FindNavigator.search(intent.term, state.filteredFiles())
             }
             val logMsg = if (matches.hasMatches) {
                 "Found ${matches.matchIndices.size} match(es) for \"${intent.term}\""
@@ -179,6 +184,50 @@ object AppReducer {
                 statusLog = state.statusLog.append("Removed $name.")
             )
         }
+
+        // ── Filters ─────────────────────────────────────────────────────
+
+        is AppIntent.ToggleExtensionFilter -> {
+            val ext = intent.extension
+            state.copy(
+                deselectedExtensions = if (ext in state.deselectedExtensions)
+                    state.deselectedExtensions - ext
+                else
+                    state.deselectedExtensions + ext,
+                findMatches = FindNavigator.FindMatches() // indices invalidated by filter change
+            )
+        }
+
+        is AppIntent.ToggleColorFilter -> {
+            val tag = intent.tag
+            state.copy(
+                deselectedColorTags = if (tag in state.deselectedColorTags)
+                    state.deselectedColorTags - tag
+                else
+                    state.deselectedColorTags + tag,
+                findMatches = FindNavigator.FindMatches() // indices invalidated by filter change
+            )
+        }
+
+        is AppIntent.SelectAllExtensions -> state.copy(
+            deselectedExtensions = emptySet(),
+            findMatches = FindNavigator.FindMatches()
+        )
+
+        is AppIntent.DeselectAllExtensions -> state.copy(
+            deselectedExtensions = state.files.map { extOfName(it.fileName) }.toSet(),
+            findMatches = FindNavigator.FindMatches()
+        )
+
+        is AppIntent.SelectAllColorTags -> state.copy(
+            deselectedColorTags = emptySet(),
+            findMatches = FindNavigator.FindMatches()
+        )
+
+        is AppIntent.DeselectAllColorTags -> state.copy(
+            deselectedColorTags = ColorTag.entries.toSet(),
+            findMatches = FindNavigator.FindMatches()
+        )
 
         // ── Async results ──────────────────────────────────────────────
 

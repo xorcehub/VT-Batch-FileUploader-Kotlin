@@ -53,23 +53,25 @@ class AppStore(
             }
 
             is AppIntent.StartProcessing -> {
-                if (state.files.any { it.status == FileStatus.PENDING && it.md5Hash != null }) {
-                    sideEffects.processFiles(state.files)
+                val visible = state.filteredFiles()
+                if (visible.any { it.status == FileStatus.PENDING && it.md5Hash != null }) {
+                    sideEffects.processFiles(visible)
                 }
             }
 
             is AppIntent.UploadNewFiles -> {
-                if (state.files.any { it.status == FileStatus.HASHED_NOT_FOUND }) {
-                    sideEffects.uploadFiles(state.files)
+                val visible = state.filteredFiles()
+                if (visible.any { it.status == FileStatus.HASHED_NOT_FOUND }) {
+                    sideEffects.uploadFiles(visible)
                 }
             }
 
             is AppIntent.OpenHashedFiles -> {
-                sideEffects.openHashedFiles(state.files)
+                sideEffects.openHashedFiles(state.filteredFiles())
             }
 
             is AppIntent.ExportFiles -> {
-                sideEffects.exportFiles(state.files)
+                sideEffects.exportFiles(state.filteredFiles())
             }
 
             is AppIntent.ClearList -> {
@@ -85,7 +87,7 @@ class AppStore(
             }
 
             is AppIntent.SubmitCommand -> {
-                sideEffects.executeCommand(intent.text, state.files)
+                sideEffects.executeCommand(intent.text, state.files, state.filteredFiles())
             }
 
             is AppIntent.TogglePause -> {

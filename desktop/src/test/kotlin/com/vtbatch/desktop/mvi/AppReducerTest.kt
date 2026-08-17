@@ -344,6 +344,133 @@ class AppReducerTest {
         assertTrue(result.statusLog.last().endsWith("Info message"))
     }
 
+    // ── Filters ────────────────────────────────────────────────────
+
+    @Test
+    fun `ToggleExtensionFilter adds extension to deselected set`() {
+        val result = reducer.reduce(initialState, AppIntent.ToggleExtensionFilter(".py"))
+        assertTrue(".py" in result.deselectedExtensions)
+    }
+
+    @Test
+    fun `ToggleExtensionFilter removes extension when already deselected`() {
+        val state = initialState.copy(deselectedExtensions = setOf(".py", ".exe"))
+        val result = reducer.reduce(state, AppIntent.ToggleExtensionFilter(".py"))
+        assertTrue(".py" !in result.deselectedExtensions)
+        assertTrue(".exe" in result.deselectedExtensions)
+    }
+
+    @Test
+    fun `ToggleColorFilter adds tag to deselected set`() {
+        val result = reducer.reduce(initialState, AppIntent.ToggleColorFilter(ColorTag.MALICIOUS))
+        assertTrue(ColorTag.MALICIOUS in result.deselectedColorTags)
+    }
+
+    @Test
+    fun `ToggleColorFilter removes tag when already deselected`() {
+        val state = initialState.copy(deselectedColorTags = setOf(ColorTag.MALICIOUS, ColorTag.CLEAN))
+        val result = reducer.reduce(state, AppIntent.ToggleColorFilter(ColorTag.MALICIOUS))
+        assertTrue(ColorTag.MALICIOUS !in result.deselectedColorTags)
+        assertTrue(ColorTag.CLEAN in result.deselectedColorTags)
+    }
+
+    @Test
+    fun `SelectAllExtensions clears deselected set`() {
+        val state = initialState.copy(deselectedExtensions = setOf(".py", ".exe"))
+        val result = reducer.reduce(state, AppIntent.SelectAllExtensions)
+        assertTrue(result.deselectedExtensions.isEmpty())
+    }
+
+    @Test
+    fun `DeselectAllExtensions sets all file extensions as deselected`() {
+        val state = initialState.copy(files = listOf(
+            FileEntry(path = "a.exe", fileName = "a.exe", fileSizeBytes = 1, fileSizeFormatted = "1 B"),
+            FileEntry(path = "b.py", fileName = "b.py", fileSizeBytes = 1, fileSizeFormatted = "1 B")
+        ))
+        val result = reducer.reduce(state, AppIntent.DeselectAllExtensions)
+        assertEquals(setOf(".exe", ".py"), result.deselectedExtensions)
+    }
+
+    @Test
+    fun `SelectAllColorTags clears deselected set`() {
+        val state = initialState.copy(deselectedColorTags = setOf(ColorTag.MALICIOUS))
+        val result = reducer.reduce(state, AppIntent.SelectAllColorTags)
+        assertTrue(result.deselectedColorTags.isEmpty())
+    }
+
+    @Test
+    fun `DeselectAllColorTags sets all tags as deselected`() {
+        val result = reducer.reduce(initialState, AppIntent.DeselectAllColorTags)
+        assertEquals(ColorTag.entries.toSet(), result.deselectedColorTags)
+    }
+
+    @Test
+    fun `ClearList resets filter state`() {
+        val state = initialState.copy(
+            files = listOf(FileEntry(path = "a", fileName = "a", fileSizeBytes = 1, fileSizeFormatted = "1 B")),
+            deselectedExtensions = setOf(".py"),
+            deselectedColorTags = setOf(ColorTag.MALICIOUS)
+        )
+        val result = reducer.reduce(state, AppIntent.ClearList)
+        assertTrue(result.deselectedExtensions.isEmpty())
+        assertTrue(result.deselectedColorTags.isEmpty())
+    }
+
+    // ── filteredFiles() ──────────────────────────────────────────────
+
+    @Test
+    fun `filteredFiles returns all when no filters active`() {
+        val files = listOf(
+            FileEntry(path = "a.exe", fileName = "a.exe", fileSizeBytes = 1, fileSizeFormatted = "1 B"),
+            FileEntry(path = "b.py", fileName = "b.py", fileSizeBytes = 1, fileSizeFormatted = "1 B")
+        )
+        val state = initialState.copy(files = files)
+        assertEquals(2, state.filteredFiles().size)
+    }
+
+    @Test
+    fun `filteredFiles excludes deselected extensions`() {
+        val files = listOf(
+            FileEntry(path = "a.exe", fileName = "a.exe", fileSizeBytes = 1, fileSizeFormatted = "1 B"),
+            FileEntry(path = "b.py", fileName = "b.py", fileSizeBytes = 1, fileSizeFormatted = "1 B"),
+            FileEntry(path = "c.dll", fileName = "c.dll", fileSizeBytes = 1, fileSizeFormatted = "1 B")
+        )
+        val state = initialState.copy(files = files, deselectedExtensions = setOf(".py"))
+        val filtered = state.filteredFiles()
+        assertEquals(2, filtered.size)
+        assertTrue(filtered.all { it.fileName != "b.py" })
+    }
+
+    @Test
+    fun `filteredFiles excludes deselected color tags`() {
+        val clean = FileEntry(path = "a.exe", fileName = "a.exe", fileSizeBytes = 1,
+            fileSizeFormatted = "1 B", md5Hash = "abc", status = FileStatus.HASHED_FOUND, detectionRatio = "0/70")
+        val malicious = FileEntry(path = "b.exe", fileName = "b.exe", fileSizeBytes = 1,
+            fileSizeFormatted = "1 B", md5Hash = "def", status = FileStatus.HASHED_FOUND, detectionRatio = "10/70")
+        val state = initialState.copy(
+            files = listOf(clean, malicious),
+            deselectedColorTags = setOf(ColorTag.MALICIOUS)
+        )
+        val filtered = state.filteredFiles()
+        assertEquals(1, filtered.size)
+        assertEquals("a.exe", filtered[0].fileName)
+    }
+
+    @Test
+    fun `StartProcessing count respects filters`() {
+        val exe = FileEntry(path = "a.exe", fileName = "a.exe", fileSizeBytes = 1,
+            fileSizeFormatted = "1 B", md5Hash = "abc", status = FileStatus.PENDING)
+        val py = FileEntry(path = "b.py", fileName = "b.py", fileSizeBytes = 1,
+            fileSizeFormatted = "1 B", md5Hash = "def", status = FileStatus.PENDING)
+        val state = initialState.copy(
+            files = listOf(exe, py),
+            deselectedExtensions = setOf(".py")
+        )
+        val result = reducer.reduce(state, AppIntent.StartProcessing)
+        assertTrue(result.isProcessing)
+        assertTrue(result.statusLog.last().contains("1 file(s)"))
+    }
+
     // ── Find ────────────────────────────────────────────────────────
 
     @Test

@@ -71,10 +71,27 @@ fun App(store: AppStore = remember { AppStore() }) {
                     onExport = { store.dispatch(AppIntent.ExportFiles) }
                 )
 
-                // Middle: File list (takes remaining vertical space)
+                // Middle: filters + file list
+                val filteredFiles = remember(state.files, state.deselectedExtensions, state.deselectedColorTags) {
+                    state.filteredFiles()
+                }
+
+                FilterBar(
+                    files = state.files,
+                    deselectedExtensions = state.deselectedExtensions,
+                    deselectedColorTags = state.deselectedColorTags,
+                    onToggleExtension = { ext -> store.dispatch(AppIntent.ToggleExtensionFilter(ext)) },
+                    onToggleColor = { tag -> store.dispatch(AppIntent.ToggleColorFilter(tag)) },
+                    onSelectAllExtensions = { store.dispatch(AppIntent.SelectAllExtensions) },
+                    onDeselectAllExtensions = { store.dispatch(AppIntent.DeselectAllExtensions) },
+                    onSelectAllColors = { store.dispatch(AppIntent.SelectAllColorTags) },
+                    onDeselectAllColors = { store.dispatch(AppIntent.DeselectAllColorTags) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
                 Box(modifier = Modifier.weight(1f, fill = true)) {
                     FileList(
-                        files = state.files,
+                        files = filteredFiles,
                         expandedFilePath = state.expandedFilePath,
                         findMatches = state.findMatches,
                         onToggleExpansion = { path -> store.dispatch(AppIntent.ToggleFileExpansion(path)) },
