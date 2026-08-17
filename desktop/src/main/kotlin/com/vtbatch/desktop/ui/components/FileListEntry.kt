@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -35,6 +36,7 @@ fun FileListEntry(
     isExpanded: Boolean = false,
     onToggleExpansion: (String) -> Unit = {},
     onRecheck: (String) -> Unit = {},
+    onRemove: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val accentColor = when (file.colorTag) {
@@ -137,63 +139,98 @@ fun FileListEntry(
                     }
                 }
 
-                // Action buttons
+                // Action buttons — all share the same pill style for a uniform look
+                val btnColors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                val btnShape = RoundedCornerShape(12.dp)
+                val btnPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+
                 val hasHash = file.md5Hash != null || file.sha256Hash != null
                 val isRechecking = file.status == FileStatus.QUEUED_FOR_RECHECK ||
                     file.status == FileStatus.RECHECKING
-                if (file.analysisUrl != null || hasHash) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        // Recheck: filled button normally, swapped for a spinner while
-                        // queued/rechecking so it can't be double-fired (VT's reanalyse
-                        // endpoint 409s on repeats). Data is preserved during recheck, so
-                        // Open VT stays usable beside it.
-                        if (hasHash && !isRechecking) {
-                            Button(
-                                onClick = { onRecheck(file.path) },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                                ),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    contentDescription = "Recheck",
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Recheck", style = MaterialTheme.typography.labelMedium)
-                            }
-                        } else if (hasHash && isRechecking) {
-                            // Reserve the Recheck button's footprint and center the spinner in it,
-                            // so Open VT keeps its position instead of collapsing onto the spinner.
-                            Box(
-                                modifier = Modifier.width(96.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
 
-                        // VT link button (if analysis is available)
-                        if (file.analysisUrl != null) {
-                            TextButton(
-                                onClick = {
-                                    try {
-                                        if (Desktop.isDesktopSupported()) {
-                                            Desktop.getDesktop().browse(URI(file.analysisUrl))
-                                        }
-                                    } catch (_: Exception) { /* ignore browser launch failures */ }
-                                },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                            ) {
-                                Text("Open VT", color = MaterialTheme.colorScheme.primary)
-                            }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // Recheck: filled button normally, swapped for a spinner while
+                    // queued/rechecking so it can't be double-fired (VT's reanalyse
+                    // endpoint 409s on repeats).
+                    if (hasHash && !isRechecking) {
+                        Button(
+                            onClick = { onRecheck(file.path) },
+                            shape = btnShape,
+                            colors = btnColors,
+                            contentPadding = btnPadding
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Recheck",
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Recheck", style = MaterialTheme.typography.labelMedium)
+                        }
+                    } else if (hasHash && isRechecking) {
+                        // Reserve the Recheck button's footprint and center the spinner in it,
+                        // so Open VT keeps its position instead of collapsing onto the spinner.
+                        Box(
+                            modifier = Modifier.width(96.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    // VT link button (if analysis is available)
+                    if (file.analysisUrl != null) {
+                        Button(
+                            onClick = {
+                                try {
+                                    if (Desktop.isDesktopSupported()) {
+                                        Desktop.getDesktop().browse(URI(file.analysisUrl))
+                                    }
+                                } catch (_: Exception) { /* ignore browser launch failures */ }
+                            },
+                            shape = btnShape,
+                            colors = btnColors,
+                            contentPadding = btnPadding
+                        ) {
+                            Text("Open VT", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+
+                    // Separator + remove button — grouped so separator is
+                    // centered in the gap, not governed by spacedBy.
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        // horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(start = 8.dp, end = 8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .height(16.dp)
+                                .background(MaterialTheme.colorScheme.outlineVariant)
+                        )
+                        Button(
+                            onClick = { onRemove(file.path) },
+                            modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 1.dp),
+                            shape = btnShape,
+                            colors = btnColors,
+                            contentPadding = PaddingValues(horizontal = 5.dp, vertical = 5.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Remove file",
+                                modifier = Modifier.size(14.dp)
+                            )
                         }
                     }
                 }

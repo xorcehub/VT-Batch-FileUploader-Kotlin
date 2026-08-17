@@ -61,6 +61,7 @@ fun App(store: AppStore = remember { AppStore() }) {
                         expandedFilePath = state.expandedFilePath,
                         onToggleExpansion = { path -> store.dispatch(AppIntent.ToggleFileExpansion(path)) },
                         onRecheck = { path -> store.dispatch(AppIntent.RecheckFile(path)) },
+                        onRemove = { path -> store.dispatch(AppIntent.RemoveFile(path)) },
                         modifier = Modifier.fillMaxSize()
                     )
                 }

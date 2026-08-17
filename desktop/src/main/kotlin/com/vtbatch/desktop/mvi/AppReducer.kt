@@ -171,6 +171,15 @@ object AppReducer {
             )
         }
 
+        is AppIntent.RemoveFile -> {
+            val name = state.files.find { it.path == intent.path }?.fileName ?: intent.path
+            state.copy(
+                files = state.files.filter { it.path != intent.path },
+                expandedFilePath = if (state.expandedFilePath == intent.path) null else state.expandedFilePath,
+                statusLog = state.statusLog.append("Removed $name.")
+            )
+        }
+
         // ── Async results ──────────────────────────────────────────────
 
         is AppIntent.FilesScanned -> {

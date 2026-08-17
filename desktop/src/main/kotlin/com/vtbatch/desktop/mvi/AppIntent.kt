@@ -71,6 +71,9 @@ sealed class AppIntent {
     /** User clicked the per-row "Recheck" button to request fresh VT re-analysis for one file */
     data class RecheckFile(val path: String) : AppIntent()
 
+    /** User clicked the per-row "X" button to remove a single file from the list */
+    data class RemoveFile(val path: String) : AppIntent()
+
     // ── Async results (from side effects) ──────────────────────────────
 
     /** File scanning completed — here are the entries (with MD5 hashes and cache status) */

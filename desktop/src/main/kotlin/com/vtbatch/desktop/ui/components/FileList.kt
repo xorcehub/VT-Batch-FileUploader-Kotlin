@@ -18,6 +18,7 @@ fun FileList(
     expandedFilePath: String? = null,
     onToggleExpansion: (String) -> Unit = {},
     onRecheck: (String) -> Unit = {},
+    onRemove: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -30,7 +31,8 @@ fun FileList(
                 file = file,
                 isExpanded = expandedFilePath == file.path,
                 onToggleExpansion = onToggleExpansion,
-                onRecheck = onRecheck
+                onRecheck = onRecheck,
+                onRemove = onRemove
             )
         }
     }
