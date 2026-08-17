@@ -5,6 +5,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.*
 import androidx.compose.ui.unit.dp
 import com.vtbatch.desktop.mvi.*
 import com.vtbatch.desktop.theme.VTBatchTheme
@@ -24,7 +25,23 @@ fun App(store: AppStore = remember { AppStore() }) {
 
     VTBatchTheme {
         Surface(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .onPreviewKeyEvent { keyEvent ->
+                    if (keyEvent.type == KeyEventType.KeyDown && state.findMatches.hasMatches) {
+                        when (keyEvent.key) {
+                            Key.PageDown -> {
+                                store.dispatch(AppIntent.NavigateMatches(1))
+                                true
+                            }
+                            Key.PageUp -> {
+                                store.dispatch(AppIntent.NavigateMatches(-1))
+                                true
+                            }
+                            else -> false
+                        }
+                    } else false
+                },
             color = MaterialTheme.colorScheme.background
         ) {
             Column(
@@ -59,6 +76,7 @@ fun App(store: AppStore = remember { AppStore() }) {
                     FileList(
                         files = state.files,
                         expandedFilePath = state.expandedFilePath,
+                        findMatches = state.findMatches,
                         onToggleExpansion = { path -> store.dispatch(AppIntent.ToggleFileExpansion(path)) },
                         onRecheck = { path -> store.dispatch(AppIntent.RecheckFile(path)) },
                         onRemove = { path -> store.dispatch(AppIntent.RemoveFile(path)) },

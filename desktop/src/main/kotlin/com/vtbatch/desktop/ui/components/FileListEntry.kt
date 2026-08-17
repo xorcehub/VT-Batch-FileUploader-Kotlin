@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -17,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -30,10 +32,15 @@ import java.net.URI
 // status, detection ratio, and VT URL. Color-coded by detection result.
 // Click to expand/collapse a detail panel with rich VT analysis data.
 
+// Find-highlight color: soft pastel yellow — visible but not harsh
+private val FindHighlightColor = Color(0xFFFFF9C4)       // Yellow 50 (very light)
+private val FindHighlightBorderColor = Color(0xFFFFEE58)  // Yellow 600 (subtle edge)
+
 @Composable
 fun FileListEntry(
     file: FileEntry,
     isExpanded: Boolean = false,
+    isFindHighlighted: Boolean = false,
     onToggleExpansion: (String) -> Unit = {},
     onRecheck: (String) -> Unit = {},
     onRemove: (String) -> Unit = {},
@@ -51,11 +58,19 @@ fun FileListEntry(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))
+            .then(
+                if (isFindHighlighted)
+                    Modifier.border(1.5.dp, FindHighlightBorderColor, RoundedCornerShape(6.dp))
+                else Modifier
+            )
             .clickable { onToggleExpansion(file.path) },
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            containerColor = if (isFindHighlighted)
+                FindHighlightColor.copy(alpha = 0.5f)
+            else
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isFindHighlighted) 3.dp else 1.dp)
     ) {
         Column {
             // ── Main row (always visible) ─────────────────────────────
