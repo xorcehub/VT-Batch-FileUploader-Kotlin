@@ -16,6 +16,9 @@ Checking a folder of downloads or attachments one file at a time on VirusTotal i
 - **Drag & drop** files or directories for scanning
 - **Local cache** for fast re-scans
 - **Recheck timer** - force re-analysis of known hashes
+- **Filter bar** - chip filters by extension and verdict status; list, find, export, and open-red act on the filtered view
+- **Per-row actions** - recheck or remove a single file without touching the rest
+- **Find navigation** - `find` scrolls to and highlights matches; PageUp/PageDown cycles through them
 - **15+ commands** via the text input (help, check, force, find, list, stats, export, etc.)
 - **CLI mode** - same commands available from the terminal
 - **Quota display** - tracks daily/monthly API usage
@@ -69,6 +72,7 @@ check <hash>       Check a hash on VirusTotal
 update             Refresh file list from VT
 clear              Clear the file list
 force [hash]       Force recheck all hashes, or a single hash
+force-older <date> Force recheck hashes older than a date (YYYY-MM-DD)
 find <term>        Search files by name
 list [ext]         List files by extension
 remove-green       Remove clean files (0 detections)
