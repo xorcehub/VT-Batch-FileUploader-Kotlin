@@ -3,6 +3,7 @@ package com.vtbatch.desktop.mvi
 import com.vtbatch.model.*
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.*
+import kotlinx.serialization.json.JsonObject
 import java.awt.Desktop
 import java.awt.FileDialog
 import java.awt.Frame
@@ -622,7 +623,27 @@ class SideEffects(
                                     // Per-engine hits come straight from the analysis
                                     // response's `results` map — no extra call needed.
                                     val engineHits = VTResponseParser.extractEngineHitsFromAnalysis(result)
-                                    val lastDate = System.currentTimeMillis() / 1000
+
+                                    // The analysis object is sparse (no name/tags/votes/
+                                    // history). One GET /files/{sha256} fetches the full
+                                    // file object, so freshly uploaded entries cache the
+                                    // same fields as hash-lookup entries.
+                                    // ponytail: +1 request per uploaded file; fall back
+                                    // to sparse data if this call fails (e.g. rate limit).
+                                    var fileObj: JsonObject? = null
+                                    val details = sha256?.let {
+                                        try {
+                                            fileObj = withContext(Dispatchers.IO) {
+                                                api.checkFileOnVirusTotal(it)
+                                            }
+                                            fileObj?.let(VTResponseParser::extractFileDetails)
+                                        } catch (e: Exception) {
+                                            logger.warn { "Detail enrich failed for ${entry.fileName}: ${e.message}" }
+                                            null
+                                        }
+                                    }
+                                    val lastDate = fileObj?.let { VTResponseParser.extractLastAnalysisDate(it) }
+                                        ?: (System.currentTimeMillis() / 1000)
                                     val detectionStats = ratio?.let { VTResponseParser.DetectionStats(it, it) }
 
                                     val updatedEntry = entry.copy(
@@ -632,13 +653,13 @@ class SideEffects(
                                         detectionRatio = ratio,
                                         lastAnalysisDate = formatTimestamp(lastDate),
                                         engineHits = engineHits
-                                    )
+                                    ).withDetails(details).copy(engineHits = engineHits)
 
                                     // status="completed" marks freshly-uploaded files;
                                     // engineHits persist so a re-drop restores them.
                                     container.quotaManager.saveEntry(
                                         entry.md5Hash ?: "",
-                                        buildCacheEntry(entry, sha256, lastDate, detectionStats, null)
+                                        buildCacheEntry(entry, sha256, lastDate, detectionStats, details)
                                             .copy(status = "completed", engineHits = engineHits)
                                     )
 
