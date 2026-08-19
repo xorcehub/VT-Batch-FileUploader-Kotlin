@@ -71,6 +71,27 @@ sealed class AppIntent {
     /** User clicked the per-row "Recheck" button to request fresh VT re-analysis for one file */
     data class RecheckFile(val path: String) : AppIntent()
 
+    /** User clicked the per-row "X" button to remove a single file from the list */
+    data class RemoveFile(val path: String) : AppIntent()
+
+    /** Toggle one extension in/out of the deselected set */
+    data class ToggleExtensionFilter(val extension: String) : AppIntent()
+
+    /** Toggle one color tag in/out of the deselected set */
+    data class ToggleColorFilter(val tag: ColorTag) : AppIntent()
+
+    /** Select all extensions (clear deselection set) */
+    object SelectAllExtensions : AppIntent()
+
+    /** Deselect all extensions (derived from current file list in reducer) */
+    object DeselectAllExtensions : AppIntent()
+
+    /** Select all color tags (clear deselection set) */
+    object SelectAllColorTags : AppIntent()
+
+    /** Deselect all color tags */
+    object DeselectAllColorTags : AppIntent()
+
     // ── Async results (from side effects) ──────────────────────────────
 
     /** File scanning completed — here are the entries (with MD5 hashes and cache status) */

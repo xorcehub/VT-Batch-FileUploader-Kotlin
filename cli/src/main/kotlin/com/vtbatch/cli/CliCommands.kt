@@ -4,6 +4,7 @@ import com.vtbatch.model.*
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonObject
 import picocli.CommandLine.Command
 import picocli.CommandLine.Option
 import picocli.CommandLine.Parameters
@@ -197,6 +198,45 @@ class ScanCommand : Callable<Int> {
 //  CHECK
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * Build a fully-populated CacheEntry from a VT file object — same fields
+ * as the GUI's buildCacheEntry, so CLI and GUI cache writes are identical
+ * for both already-on-VT files and freshly uploaded ones.
+ */
+private fun fullCacheEntry(
+    hash: String,
+    filePath: String?,
+    fileObj: JsonObject,
+    status: String,
+    engineHits: List<EngineHit>? = null
+): QuotaManager.CacheEntry {
+    val details = VTResponseParser.extractFileDetails(fileObj)
+    val stats = VTResponseParser.extractDetectionStats(fileObj)
+    return QuotaManager.CacheEntry(
+        filename = filePath?.let { File(it).name } ?: details?.meaningfulName,
+        size = filePath?.let { File(it).length() },
+        path = filePath,
+        url = VTResponseParser.extractSha256(fileObj)?.let { "https://www.virustotal.com/gui/file/$it" },
+        lastScan = java.time.LocalDateTime.now().toString(),
+        status = status,
+        lastAnalysisStats = stats?.description ?: details?.lastAnalysisStats,
+        lastAnalysisDate = VTResponseParser.extractLastAnalysisDate(fileObj),
+        detections = stats?.ratio,
+        detectionCount = details?.detectionCount,
+        suggestedThreatLabel = details?.suggestedThreatLabel,
+        typeDescription = details?.typeDescription,
+        tags = details?.tags?.joinToString(","),
+        meaningfulName = details?.meaningfulName,
+        timesSubmitted = details?.timesSubmitted,
+        reputation = details?.reputation,
+        firstSubmissionDate = details?.firstSubmissionDate,
+        lastSubmissionDate = details?.lastSubmissionDate,
+        totalVotesHarmless = details?.totalVotesHarmless,
+        totalVotesMalicious = details?.totalVotesMalicious,
+        engineHits = engineHits ?: details?.engineHits
+    )
+}
+
 @Command(name = "check", description = ["Check a file or hash against VirusTotal"])
 class CheckCommand : Callable<Int> {
     @ParentCommand lateinit var parent: RootCommand
@@ -257,16 +297,10 @@ class CheckCommand : Callable<Int> {
                     "detections" to stats?.ratio, "last_analysis_date" to lastDate
                 )
 
-                // Save to cache
-                runBlocking { cache.saveEntry(hash, QuotaManager.CacheEntry(
-                    filename = filePath?.let { File(it).name },
-                    path = filePath,
-                    url = data["analysis_url"] as? String,
-                    lastScan = java.time.LocalDateTime.now().toString(),
-                    status = "found",
-                    lastAnalysisDate = lastDate,
-                    detections = stats?.ratio
-                )) }
+                // Save to cache — full field set, same as GUI
+                runBlocking {
+                    cache.saveEntry(hash, fullCacheEntry(hash, filePath, result, status = "found"))
+                }
 
                 out.success("check", data)
                 ExitCodes.SUCCESS
@@ -325,6 +359,7 @@ class UploadCommand : Callable<Int> {
             var uploaded = 0
             var skipped = 0
             var failed = 0
+            val cache = QuotaManager()
 
             for (filePath in files) {
                 val file = File(filePath)
@@ -349,6 +384,11 @@ class UploadCommand : Callable<Int> {
                                 "reason" to "already_exists", "md5_hash" to md5,
                                 "analysis_url" to sha256?.let { "https://www.virustotal.com/gui/file/$it" }
                             ))
+                            // Already-fetched file object — cache the full field set,
+                            // same as the GUI's hash-found path (no extra API call).
+                            runBlocking {
+                                cache.saveEntry(md5, fullCacheEntry(md5, filePath, existing, status = "found"))
+                            }
                             skipped++
                             continue
                         }
@@ -384,6 +424,23 @@ class UploadCommand : Callable<Int> {
                                 val stats = analysis?.let { VTResponseParser.extractDetectionStatsFromAnalysis(it) }
                                 entry["status"] = "completed"
                                 entry["last_analysis_stats"] = stats
+
+                                // The analysis object is sparse — one GET /files/{sha256}
+                                // fetches the full file object so uploaded files cache
+                                // the same fields as already-known ones (GUI parity).
+                                // ponytail: +1 request per uploaded file; skip on failure.
+                                val sha256 = analysis?.let { VTResponseParser.extractSha256FromAnalysis(it) }
+                                val fileObj = sha256?.let {
+                                    try {
+                                        runBlocking { api.checkFileOnVirusTotal(it) }
+                                    } catch (_: Exception) { null }
+                                }
+                                if (fileObj != null) {
+                                    val engineHits = analysis?.let { VTResponseParser.extractEngineHitsFromAnalysis(it) }
+                                    runBlocking {
+                                        cache.saveEntry(md5, fullCacheEntry(md5, filePath, fileObj, "completed", engineHits))
+                                    }
+                                }
                                 break
                             }
                             runBlocking { delay(10000L) } // poll every 10s

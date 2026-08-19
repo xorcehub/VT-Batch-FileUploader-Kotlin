@@ -3,6 +3,7 @@ package com.vtbatch.desktop.mvi
 import com.vtbatch.model.*
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.*
+import kotlinx.serialization.json.JsonObject
 import java.awt.Desktop
 import java.awt.FileDialog
 import java.awt.Frame
@@ -336,16 +337,17 @@ class SideEffects(
                 it.status == FileStatus.PENDING && it.md5Hash != null
             }
 
-            // Mark files that failed hashing as ERROR (md5Hash == null)
+            // Mark files that failed hashing as HASH_FAILED (md5Hash == null)
             val hashFailed = files.filter {
                 it.status == FileStatus.PENDING && it.md5Hash == null
             }
-            if (hashFailed.isNotEmpty()) {
-                val failedUpdates = hashFailed.map { it.copy(
+            for (entry in hashFailed) {
+                dispatch(AppIntent.FileProcessed(entry.path, entry.copy(
                     status = FileStatus.HASH_FAILED,
                     errorMessage = "Failed to compute file hash"
-                ) }
-                dispatch(AppIntent.FilesUpdated(failedUpdates))
+                )))
+            }
+            if (hashFailed.isNotEmpty()) {
                 logger.warn { "${hashFailed.size} files skipped due to failed hashing" }
             }
 
@@ -621,7 +623,27 @@ class SideEffects(
                                     // Per-engine hits come straight from the analysis
                                     // response's `results` map — no extra call needed.
                                     val engineHits = VTResponseParser.extractEngineHitsFromAnalysis(result)
-                                    val lastDate = System.currentTimeMillis() / 1000
+
+                                    // The analysis object is sparse (no name/tags/votes/
+                                    // history). One GET /files/{sha256} fetches the full
+                                    // file object, so freshly uploaded entries cache the
+                                    // same fields as hash-lookup entries.
+                                    // ponytail: +1 request per uploaded file; fall back
+                                    // to sparse data if this call fails (e.g. rate limit).
+                                    var fileObj: JsonObject? = null
+                                    val details = sha256?.let {
+                                        try {
+                                            fileObj = withContext(Dispatchers.IO) {
+                                                api.checkFileOnVirusTotal(it)
+                                            }
+                                            fileObj?.let(VTResponseParser::extractFileDetails)
+                                        } catch (e: Exception) {
+                                            logger.warn { "Detail enrich failed for ${entry.fileName}: ${e.message}" }
+                                            null
+                                        }
+                                    }
+                                    val lastDate = fileObj?.let { VTResponseParser.extractLastAnalysisDate(it) }
+                                        ?: (System.currentTimeMillis() / 1000)
                                     val detectionStats = ratio?.let { VTResponseParser.DetectionStats(it, it) }
 
                                     val updatedEntry = entry.copy(
@@ -631,13 +653,13 @@ class SideEffects(
                                         detectionRatio = ratio,
                                         lastAnalysisDate = formatTimestamp(lastDate),
                                         engineHits = engineHits
-                                    )
+                                    ).withDetails(details).copy(engineHits = engineHits)
 
                                     // status="completed" marks freshly-uploaded files;
                                     // engineHits persist so a re-drop restores them.
                                     container.quotaManager.saveEntry(
                                         entry.md5Hash ?: "",
-                                        buildCacheEntry(entry, sha256, lastDate, detectionStats, null)
+                                        buildCacheEntry(entry, sha256, lastDate, detectionStats, details)
                                             .copy(status = "completed", engineHits = engineHits)
                                     )
 
@@ -836,7 +858,10 @@ class SideEffects(
     //  COMMANDS
     // ═══════════════════════════════════════════════════════════════════
 
-    fun executeCommand(text: String, currentFiles: List<FileEntry>) {
+    fun executeCommand(text: String, allFiles: List<FileEntry>, filteredFiles: List<FileEntry> = allFiles) {
+        // filteredFiles = what the user sees (respects UI filters) — used for view/quota ops.
+        // allFiles = the underlying list — used for destructive cleanup (remove-green
+        // should purge clean files even if the green chips are toggled off).
         val trimmed = text.trim()
         if (trimmed.isBlank()) return
 
@@ -846,23 +871,23 @@ class SideEffects(
             when {
                 trimmed.equals("help", ignoreCase = true) -> showHelp()
                 trimmed.startsWith("check ", ignoreCase = true) -> checkHash(trimmed.removePrefix("check ").trim())
-                trimmed.equals("update", ignoreCase = true) || trimmed.equals("u", ignoreCase = true) -> updateFiles(currentFiles)
+                trimmed.equals("update", ignoreCase = true) || trimmed.equals("u", ignoreCase = true) -> updateFiles(filteredFiles)
                 trimmed.equals("clear", ignoreCase = true) -> dispatch(AppIntent.ClearList)
-                trimmed.startsWith("force", ignoreCase = true) -> forceRecheck(trimmed, currentFiles)
-                trimmed.startsWith("remove-green", ignoreCase = true) -> removeGreen(currentFiles)
+                trimmed.startsWith("force", ignoreCase = true) -> forceRecheck(trimmed, filteredFiles)
+                trimmed.startsWith("remove-green", ignoreCase = true) -> removeGreen(allFiles)
                 trimmed.startsWith("find ", ignoreCase = true) -> {
                     val term = trimmed.removePrefix("find ").trim()
                     dispatch(AppIntent.FindFiles(term))
                 }
-                trimmed.equals("list", ignoreCase = true) -> listFiles(currentFiles, null)
-                trimmed.startsWith("list ", ignoreCase = true) -> listFiles(currentFiles, trimmed.removePrefix("list ").trim())
+                trimmed.equals("list", ignoreCase = true) -> listFiles(filteredFiles, null)
+                trimmed.startsWith("list ", ignoreCase = true) -> listFiles(filteredFiles, trimmed.removePrefix("list ").trim())
                 trimmed.startsWith("add-ext ", ignoreCase = true) -> addExtension(trimmed.removePrefix("add-ext ").trim())
                 trimmed.startsWith("remove-ext ", ignoreCase = true) -> removeExtension(trimmed.removePrefix("remove-ext ").trim())
                 trimmed.equals("api", ignoreCase = true) -> showApiKey()
                 trimmed.equals("update-quota", ignoreCase = true) -> fetchQuota()
-                trimmed.equals("open-red", ignoreCase = true) -> openRedFiles(currentFiles)
+                trimmed.equals("open-red", ignoreCase = true) -> openRedFiles(filteredFiles)
                 trimmed.equals("stats", ignoreCase = true) -> showStats()
-                trimmed.equals("export", ignoreCase = true) -> exportFiles(currentFiles)
+                trimmed.equals("export", ignoreCase = true) -> exportFiles(filteredFiles)
                 trimmed.equals("api-swap", ignoreCase = true) -> dispatch(AppIntent.LogMessage("Unknown command. Type 'help' for available commands."))
                 else -> dispatch(AppIntent.LogMessage("Unknown command: $trimmed. Type 'help' for available commands."))
             }

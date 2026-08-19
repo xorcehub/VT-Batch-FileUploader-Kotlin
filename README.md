@@ -1,21 +1,23 @@
 # VT-Batch-FileUploader-Kotlin
 
-A Kotlin + Compose Multiplatform desktop app for batch scanning and uploading files to [VirusTotal](https://www.virustotal.com/). A rewrite of the private [Python/Tkinter version](https://github.com/xorcehub/VT-Batch-FileUploader) with a modern UI and identical functionality.
+A Kotlin + Compose Multiplatform desktop app for batch scanning and uploading files to [VirusTotal](https://www.virustotal.com/). A rewrite of my [Python/Tkinter version](https://github.com/xorcehub/VT-Batch-FileUploader) using Compose Desktop, with identical functionality.
 
-Checking a folder of downloads or attachments one file at a time on VirusTotal is tedious. This tool automates the workflow: drop a whole directory, and it hashes, checks, and uploads only the unknowns in one pass — with a local cache so re-scans of known files cost zero API calls.
+Checking a folder of downloads or attachments one file at a time on VirusTotal is tedious. This tool handles the whole thing: drop a directory, and it hashes, checks, and uploads only the unknowns in one pass, with a local cache so re-scans of known files cost zero API calls.
 
-![VT-Batch-FileUploader-Kotlin screenshot](media/Screenshot%202026-07-28%20152047.png)
-
+![VT-Batch-FileUploader-Kotlin screenshot](media/Screenshot%202026-08-19%20082909.png)
 ## Disclaimer
 
 - **Scores aren't verdicts.** A 0-detection file isn't guaranteed safe (it may simply be new or evasive), and a 1–2 detection file isn't automatically malicious (engines false-positive legitimate software). Use results for triage; sandbox anything suspicious before running it.
-- **Respect the VirusTotal Terms of Service and public-API limits** (500 requests/day, 4 requests/minute). Multiple API keys are for switching between valid accounts — not for circumventing quotas.
+- **Respect the VirusTotal Terms of Service and public-API limits** (500 requests/day, 4 requests/minute). Multiple API keys are for switching between valid accounts, not for circumventing quotas.
 
 ## Features
 
 - **Drag & drop** files or directories for scanning
 - **Local cache** for fast re-scans
 - **Recheck timer** - force re-analysis of known hashes
+- **Filter bar** - chip filters by extension and verdict status; list, find, export, and open-red act on the filtered view
+- **Per-row actions** - recheck or remove a single file without touching the rest
+- **Find navigation** - `find` scrolls to and highlights matches; PageUp/PageDown cycles through them
 - **15+ commands** via the text input (help, check, force, find, list, stats, export, etc.)
 - **CLI mode** - same commands available from the terminal
 - **Quota display** - tracks daily/monthly API usage
@@ -52,16 +54,16 @@ $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-25.0.3.9-hotspot"
 ```
 
 1. Set your VirusTotal API key via:
-   - The credential dialog (keys are stored AES-encrypted at rest in `~/.vtbatch/credentials`)
+   - The credential dialog. Keys are stored AES-encrypted at rest in `~/.vtbatch/credentials`
    - Environment variable: `VT_API_KEY`
 2. Drag files/folders onto the drop zone
 3. Click **Start** to hash and check files against VT
 4. Click **Upload** to send unknown files to VT
 5. Click **Open Hashed** to open analysis results in your browser
 
-### Commands (in-app or CLI)
+### Commands (in-app)
 
-Type commands in the text input field or use the CLI:
+Type commands in the text input field:
 
 ```
 help               Show all commands
@@ -69,6 +71,7 @@ check <hash>       Check a hash on VirusTotal
 update             Refresh file list from VT
 clear              Clear the file list
 force [hash]       Force recheck all hashes, or a single hash
+force-older <date> Force recheck hashes older than a date (YYYY-MM-DD)
 find <term>        Search files by name
 list [ext]         List files by extension
 remove-green       Remove clean files (0 detections)
@@ -84,6 +87,9 @@ stats              Show local usage statistics
 ### CLI
 
 ```powershell
+# Show all commands and options
+.\gradlew.bat :cli:run --args="--help"
+
 # Validate credentials
 .\gradlew.bat :cli:run --args="validate --api-key YOUR_KEY"
 
@@ -123,7 +129,7 @@ VT-Batch-FileUploader-Kotlin/
 └── build.gradle.kts
 ```
 
-### MVI Pattern
+### MVI pattern
 
 The desktop app uses **Model-View-Intent (MVI)**:
 
@@ -140,7 +146,7 @@ User action → Intent → Reducer(oldState, intent) → newState → UI observe
 - **AppStore** - StateFlow holder, coroutine-scoped side effect dispatch
 - **SideEffects** - All suspend functions for API calls, file I/O, etc.
 
-### Hash-first workflow
+### Hash-first design
 
 The core design: **never upload before checking the hash.** Hash lookups against VT are cheap and rate-friendly; uploads are the expensive, quota-burning operation. The flow is *hash → lookup → upload only if unknown*, and the local JSON cache extends this across sessions.
 
@@ -158,7 +164,7 @@ The core design: **never upload before checking the hash.** Hash lookups against
 .\gradlew.bat :desktop:packageRpm
 ```
 
-## Tech Stack
+## Tech stack
 
 | Concern | Library |
 |---------|---------|
@@ -174,7 +180,7 @@ The core design: **never upload before checking the hash.** Hash lookups against
 
 ## Configuration
 
-Tunables follow a priority chain: **hardcoded default → `settings.json` → env var (highest)**. `settings.json` can be edited from the in-app Settings dialog.
+Settings follow a priority chain: **hardcoded default → `settings.json` → env var (highest)**. `settings.json` can be edited from the in-app Settings dialog.
 
 `settings.json` fields (all optional, stored in `~/.vtbatch/`):
 
