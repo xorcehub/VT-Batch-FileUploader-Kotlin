@@ -68,6 +68,11 @@ compose.desktop {
             packageName = "VT-Batch-FileUploader"
             packageVersion = "1.0.0"
 
+            // Ship third-party license texts with every binary distribution
+            // (Apache-2.0 §4(b), LGPL/EPL, MIT). Sources: desktop/packaging/common/licenses,
+            // listed in THIRD-PARTY.md.
+            appResourcesRootDir = project.layout.projectDirectory.dir("packaging")
+
             windows {
                 menuGroup = "Xorce"
                 upgradeUuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"

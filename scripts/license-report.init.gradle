@@ -1,0 +1,30 @@
+// Throwaway report: prints group:name:version | license(s) from the cached POMs.
+// Run: ./gradlew -q -I scripts/license-report.init.gradle :shared:licenseReport :cli:licenseReport :desktop:licenseReport
+allprojects { p ->
+    tasks.register("licenseReport") {
+        doLast {
+            def cfg = p.configurations.findByName("runtimeClasspath")
+            if (cfg == null) return
+            def cache = new File(System.getProperty("user.home"), ".gradle/caches/modules-2/files-2.1")
+            cfg.resolvedConfiguration.resolvedArtifacts.each { art ->
+                def id = art.moduleVersion.id
+                def vdir = new File(cache, "${id.group}/${id.name}/${id.version}")
+                def poms = vdir.exists() ? vdir.listFiles().collectMany { it.listFiles()?.findAll { it.name.endsWith('.pom') } ?: [] } : []
+                if (poms.isEmpty()) {
+                    println "ARTIFACT ${id.group}:${id.name}:${id.version} | POM-NOT-FOUND"
+                } else {
+                    def xml = poms.first().text
+                    def licenses = []
+                    def m = xml =~ /(?s)<license>.*?<\/license>/
+                    while (m.find()) {
+                        def block = m.group()
+                        def ln = (block =~ /(?s)<name>(.*?)<\/name>/)
+                        def lu = (block =~ /(?s)<url>(.*?)<\/url>/)
+                        licenses << (ln.hasGroup() ? ln.group(1).trim() : "?") + " <" + (lu.hasGroup() ? lu.group(1).trim() : "?") + ">"
+                    }
+                    println "ARTIFACT ${id.group}:${id.name}:${id.version} | " + (licenses.isEmpty() ? "NO-LICENSE-IN-POM" : licenses.join(" ; "))
+                }
+            }
+        }
+    }
+}
