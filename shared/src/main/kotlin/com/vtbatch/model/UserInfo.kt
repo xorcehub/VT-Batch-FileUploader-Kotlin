@@ -56,7 +56,7 @@ suspend fun getUserInfo(
     apiKey: String,
     user: String,
     config: AppConfig = AppConfig.default,
-    engine: HttpClientEngine = OkHttp.create(),
+    engine: HttpClientEngine? = null,
     sharedClient: HttpClient? = null
 ): VTUserInfoResponse? {
     return try {
@@ -74,8 +74,13 @@ suspend fun getUserInfo(
         if (sharedClient != null) {
             performRequest(sharedClient)
         } else {
-            // Fallback: create a temporary client and close it after use
-            HttpClient(engine) {
+            // Fallback: construct a temporary client only on this path. Previously
+            // `engine: HttpClientEngine = OkHttp.create()` was a default arg, which the
+            // JVM materializes at EVERY call site — including the sharedClient path,
+            // where the engine (OkHttp ConnectionPool + Dispatcher thread pool) is
+            // built and never closed. fetchQuota calls this ~every 60s, so the pools
+            // leaked ~once a minute. Nullable default defers construction to here.
+            HttpClient(engine ?: OkHttp.create()) {
                 install(HttpTimeout) { requestTimeoutMillis = config.shortTimeout * 1000L }
                 install(ContentNegotiation) {
                     json(Json { ignoreUnknownKeys = true })

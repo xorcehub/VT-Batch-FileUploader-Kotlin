@@ -82,6 +82,11 @@ sealed class AppIntent {
     /** A single file was hash-checked against VT */
     data class FileProcessed(val path: String, val updatedEntry: FileEntry) : AppIntent()
 
+    /** Change only a row's status, preserving every other field (detection ratio,
+     *  SHA-256, URL, tags, engine hits, ...). Unlike [FileProcessed], whose reducer
+     *  replaces the whole entry, the reducer for this intent merges via copy(). */
+    data class SetFileStatus(val path: String, val status: FileStatus) : AppIntent()
+
     /** Current file being processed changed (for the "Currently Processing" display) */
     data class CurrentProcessingChanged(val file: String?, val status: String?) : AppIntent()
 
@@ -139,6 +144,12 @@ sealed class AppIntent {
 
     /** Credentials failed validation */
     data class CredentialsInvalid(val message: String) : AppIntent()
+
+    /** Validation could not reach a verdict due to a transient error (rate limit / server
+     *  error). Unlike [CredentialsInvalid], the key may still be valid, so the reducer
+     *  preserves [AppState.hasCredentials] and just stops the spinner + re-shows the
+     *  dialog so the user can retry. */
+    data class CredentialsValidationTransientError(val message: String) : AppIntent()
 
     /** Bulk file list update (e.g. after force recheck, remove-green, etc.) */
     data class FilesUpdated(val files: List<FileEntry>) : AppIntent()

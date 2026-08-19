@@ -29,7 +29,12 @@ class LocalTelemetry {
         val lastSession: String? = null,
     )
 
-    private var data = load()
+    // @Volatile: writes happen under `mutex`, but readers (cacheHitRate, getStats)
+    // read `data` WITHOUT the mutex. Without @Volatile there's no happens-before from
+    // writer to reader, so a reader thread can observe a stale snapshot indefinitely.
+    // @Volatile gives visibility of the latest published reference (the TelemetryData
+    // data class is itself immutable, so publishing the reference is enough).
+    @Volatile private var data = load()
 
     val cacheHitRate: Double
         get() = data.let { d ->

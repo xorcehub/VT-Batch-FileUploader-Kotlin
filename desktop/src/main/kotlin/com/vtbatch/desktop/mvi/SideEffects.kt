@@ -279,6 +279,11 @@ class SideEffects(
         val api = container.virusTotalApi ?: return
         dispatch(AppIntent.LogMessage("Refreshing ${stale.size} stale cache entry(ies)..."))
 
+        // Per-pass cache batch: accumulated through the loop and flushed once via
+        // saveEntries (one atomic read-modify-write) instead of saveEntry-per-file
+        // (which did a full load + full rewrite per file -> O(n^2) I/O).
+        val cacheBatch = mutableMapOf<String, QuotaManager.CacheEntry>()
+
         for (entry in stale) {
             val hash = entry.md5Hash ?: continue
             try {
@@ -292,10 +297,8 @@ class SideEffects(
                     val lastDate = VTResponseParser.extractLastAnalysisDate(result)
                     val details = VTResponseParser.extractFileDetails(result)
 
-                    // Update cache
-                    withContext(Dispatchers.IO) {
-                        container.quotaManager.saveEntry(hash, buildCacheEntry(entry, sha256, lastDate, stats, details))
-                    }
+                    // Stage to the per-pass batch — flushed once after the loop.
+                    cacheBatch[hash] = buildCacheEntry(entry, sha256, lastDate, stats, details)
 
                     entry.copy(
                         status = FileStatus.HASHED_FOUND,
@@ -312,6 +315,11 @@ class SideEffects(
             } catch (e: Exception) {
                 logger.warn { "Auto-refresh failed for ${entry.fileName}: ${e.message}" }
             }
+        }
+
+        // Flush the whole pass's cache entries in one atomic read-modify-write.
+        withContext(Dispatchers.IO) {
+            if (cacheBatch.isNotEmpty()) container.quotaManager.saveEntries(cacheBatch)
         }
 
         dispatch(AppIntent.LogMessage("Stale cache refresh complete."))
@@ -356,6 +364,10 @@ class SideEffects(
             var processed = 0
             var totalBytesProcessed = 0L
             val startTime = System.currentTimeMillis()
+            // Per-pass cache batch: accumulated through the loop and flushed once via
+            // saveEntries (one atomic read-modify-write) instead of saveEntry-per-file
+            // (which did a full load + full rewrite per file -> O(n^2) I/O).
+            val cacheBatch = mutableMapOf<String, QuotaManager.CacheEntry>()
 
             for (entry in toProcess) {
                 // Check pause
@@ -376,10 +388,8 @@ class SideEffects(
                         val sha256 = VTResponseParser.extractSha256(vtResult)
                         val details = VTResponseParser.extractFileDetails(vtResult)
 
-                        // Save to cache
-                        withContext(Dispatchers.IO) {
-                            container.quotaManager.saveEntry(entry.md5Hash!!, buildCacheEntry(entry, sha256, lastDate, stats, details))
-                        }
+                        // Stage to the per-pass batch — flushed once after the loop.
+                        cacheBatch[entry.md5Hash!!] = buildCacheEntry(entry, sha256, lastDate, stats, details)
 
                         entry.copy(
                             status = FileStatus.HASHED_FOUND,
@@ -389,16 +399,15 @@ class SideEffects(
                             lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
                         ).withDetails(details)
                     } else {
-                        // Not found on VT — cache this so we don't burn quota re-checking
-                        withContext(Dispatchers.IO) {
-                            container.quotaManager.saveEntry(entry.md5Hash!!, QuotaManager.CacheEntry(
-                                filename = entry.fileName,
-                                size = entry.fileSizeBytes,
-                                path = entry.path,
-                                lastScan = java.time.LocalDateTime.now().toString(),
-                                status = "HASHED_NOT_FOUND"
-                            ))
-                        }
+                        // Not found on VT — stage to the batch so we don't burn quota
+                        // re-checking this hash on the next run.
+                        cacheBatch[entry.md5Hash!!] = QuotaManager.CacheEntry(
+                            filename = entry.fileName,
+                            size = entry.fileSizeBytes,
+                            path = entry.path,
+                            lastScan = java.time.LocalDateTime.now().toString(),
+                            status = "HASHED_NOT_FOUND"
+                        )
                         entry.copy(status = FileStatus.HASHED_NOT_FOUND)
                     }
 
@@ -436,6 +445,13 @@ class SideEffects(
                     fileCount = processed,
                     elapsedFormatted = String.format("%.1fs", elapsed)
                 ))
+            }
+
+            // Flush the whole pass's cache entries in one atomic read-modify-write.
+            // Previously this was a saveEntry() per file -> O(n^2) full-file rewrites,
+            // and a torn read could transiently miss a cache hit (-> wasted quota).
+            withContext(Dispatchers.IO) {
+                if (cacheBatch.isNotEmpty()) container.quotaManager.saveEntries(cacheBatch)
             }
 
             dispatch(AppIntent.CurrentProcessingChanged(null, null))
@@ -677,6 +693,21 @@ class SideEffects(
                 dispatch(AppIntent.CredentialsInvalid("Connection timed out. VirusTotal servers may be down or your network is unreachable."))
             } catch (e: java.net.UnknownHostException) {
                 dispatch(AppIntent.CredentialsInvalid("Cannot resolve VirusTotal hostname. Check your internet connection."))
+            } catch (e: APIRateLimitError) {
+                // Transient: VT throttled the check — the key may still be valid. Do not
+                // report it as invalid (the C1 bug: a 429 was landing in the generic arm
+                // below and dispatching CredentialsInvalid, clearing hasCredentials and
+                // popping the credential dialog for a working key — worst on startup,
+                // which auto-validates a saved key via Main.kt).
+                val wait = e.retryAfter?.let { " Retry in ${it.toInt()}s." } ?: ""
+                dispatch(AppIntent.CredentialsValidationTransientError(
+                    "VirusTotal rate-limited the credential check.$wait Your key may still be valid — please retry."
+                ))
+            } catch (e: APIResponseError) {
+                // Transient server/HTTP error during validation — not evidence of a bad key.
+                dispatch(AppIntent.CredentialsValidationTransientError(
+                    "Could not validate key (HTTP ${e.statusCode ?: 0}). VirusTotal may be unavailable — please retry."
+                ))
             } catch (e: Exception) {
                 dispatch(AppIntent.CredentialsInvalid("Validation failed: ${e.message}"))
             }
@@ -911,6 +942,10 @@ class SideEffects(
 
         dispatch(AppIntent.LogMessage("Updating ${files.size} file(s)..."))
         val updated = mutableListOf<FileEntry>()
+        // Per-pass cache batch: accumulated through the loop and flushed once via
+        // saveEntries (one atomic read-modify-write) instead of saveEntry-per-file
+        // (which did a full load + full rewrite per file -> O(n^2) I/O).
+        val cacheBatch = mutableMapOf<String, QuotaManager.CacheEntry>()
 
         for (entry in files) {
             if (entry.md5Hash == null) {
@@ -938,10 +973,8 @@ class SideEffects(
                         lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
                     ).withDetails(details))
 
-                    // Persist to cache so re-drops get the fresh data
-                    withContext(Dispatchers.IO) {
-                        container.quotaManager.saveEntry(hash, buildCacheEntry(entry, sha256, lastDate, stats, details))
-                    }
+                    // Stage to the per-pass batch — flushed once after the loop.
+                    cacheBatch[hash] = buildCacheEntry(entry, sha256, lastDate, stats, details)
                 } else {
                     updated.add(entry.copy(status = FileStatus.HASHED_NOT_FOUND))
                 }
@@ -949,6 +982,11 @@ class SideEffects(
                 updated.add(entry)
                 dispatch(AppIntent.LogMessage("  Error updating ${entry.fileName}: ${e.message}"))
             }
+        }
+
+        // Flush the whole pass's cache entries in one atomic read-modify-write.
+        withContext(Dispatchers.IO) {
+            if (cacheBatch.isNotEmpty()) container.quotaManager.saveEntries(cacheBatch)
         }
 
         dispatch(AppIntent.FilesUpdated(updated))
@@ -1055,17 +1093,13 @@ class SideEffects(
         dispatch(AppIntent.LogMessage("Polling recheck results for ${pending.size} file(s)..."))
 
         for (recheck in pending) {
-            // Mark as actively rechecking so UI shows the correct state
-            val recheckFile = File(recheck.filePath)
-            val recheckingEntry = FileEntry(
-                path = recheck.filePath,
-                fileName = recheckFile.name,
-                fileSizeBytes = if (recheckFile.exists()) recheckFile.length() else 0L,
-                fileSizeFormatted = if (recheckFile.exists()) formatFileSize(recheckFile.length()) else "?",
-                md5Hash = recheck.md5Hash,
-                status = FileStatus.RECHECKING
-            )
-            dispatch(AppIntent.FileProcessed(recheck.filePath, recheckingEntry))
+            // Flip to RECHECKING WITHOUT discarding the row's existing VT data
+            // (detection ratio, SHA-256, URL, tags, engine hits). The old code built
+            // a bare FileEntry and dispatched FileProcessed, whose reducer does a full
+            // replace — wiping everything for the whole recheck window, and permanently
+            // if the recheck never completes (this loop has no max-rounds). SetFileStatus
+            // merges via copy(), matching requestReanalysisFor's QUEUED_FOR_RECHECK flip.
+            dispatch(AppIntent.SetFileStatus(recheck.filePath, FileStatus.RECHECKING))
             try {
                 val result = withContext(Dispatchers.IO) {
                     api.checkFileOnVirusTotal(recheck.md5Hash)

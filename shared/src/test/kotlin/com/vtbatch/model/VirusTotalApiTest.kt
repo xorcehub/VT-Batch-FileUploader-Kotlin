@@ -76,6 +76,21 @@ class VirusTotalApiTest {
         api.close()
     }
 
+    @Test
+    fun `validateCredentials throws APIRateLimitError on 429`() = runTest {
+        val api = apiWithResponse("Rate limited", HttpStatusCode(429, "Too Many Requests"))
+        assertFailsWith<APIRateLimitError> { api.validateCredentials() }
+        api.close()
+    }
+
+    @Test
+    fun `validateCredentials throws APIResponseError on unexpected status`() = runTest {
+        val api = apiWithResponse("Internal Server Error", HttpStatusCode.InternalServerError)
+        val error = assertFailsWith<APIResponseError> { api.validateCredentials() }
+        assertEquals(500, error.statusCode)
+        api.close()
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     //  checkFileOnVirusTotal
     // ═══════════════════════════════════════════════════════════════════

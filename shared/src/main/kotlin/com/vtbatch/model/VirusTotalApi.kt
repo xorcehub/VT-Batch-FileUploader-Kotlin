@@ -102,8 +102,11 @@ class VirusTotalApi(
 
     /**
      * Validate API key by hitting /users/current.
-     * Returns true if valid, false if invalid (401/403).
-     * Throws on network errors so callers can distinguish "bad key" from "can't reach server".
+     * Returns true if valid (200), false if invalid (401/403).
+     * Throws [APIRateLimitError] on 429 and [APIResponseError] on any other status so
+     * callers can distinguish "bad key" from "can't reach server / rate limited".
+     * Previously a 429 fell into a bare `else -> false`, so a rate-limited but
+     * otherwise valid key was reported as invalid and the user was told to rotate it.
      */
     suspend fun validateCredentials(): Boolean {
         val response = withRetry {
@@ -115,7 +118,14 @@ class VirusTotalApi(
         return when (response.status.value) {
             200 -> true
             401, 403 -> false
-            else -> false
+            429 -> throw APIRateLimitError(
+                "Rate limited while validating credentials",
+                retryAfter = response.headers["Retry-After"]?.toDoubleOrNull()
+            )
+            else -> throw APIResponseError(
+                "Credential check failed (HTTP ${response.status.value})",
+                statusCode = response.status.value
+            )
         }
     }
 

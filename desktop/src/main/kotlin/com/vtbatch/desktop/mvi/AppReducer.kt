@@ -188,6 +188,11 @@ object AppReducer {
             files = state.files.updateByPath(intent.path) { intent.updatedEntry }
         )
 
+        is AppIntent.SetFileStatus -> state.copy(
+            // Merge, not replace: keep all existing VT data, flip only the status.
+            files = state.files.updateByPath(intent.path) { it.copy(status = intent.status) }
+        )
+
         is AppIntent.CurrentProcessingChanged -> state.copy(
             currentFile = intent.file,
             currentStatus = intent.status
@@ -272,6 +277,15 @@ object AppReducer {
             isValidatingCredentials = false,
             showCredentialDialog = true,
             statusLog = state.statusLog.append("Credential error: ${intent.message}")
+        )
+
+        is AppIntent.CredentialsValidationTransientError -> state.copy(
+            // Transient (rate limit / server error): the key may still be valid, so do
+            // NOT clear hasCredentials. Stop the spinner and re-show the dialog so the
+            // user can retry. Contrast CredentialsInvalid, which marks the key bad.
+            isValidatingCredentials = false,
+            showCredentialDialog = true,
+            statusLog = state.statusLog.append("Validation error: ${intent.message}")
         )
 
         is AppIntent.FilesUpdated -> state.copy(
