@@ -53,6 +53,7 @@ data class FileEntry(
     val detectionRatio: String? = null,  // e.g. "0/72"
     val lastAnalysisDate: String? = null,
     val errorMessage: String? = null,
+    val fromCache: Boolean = false,      // Data loaded from local cache (no API quota used)
 
     // Detail fields (populated from VT /files/{hash} response)
     val lastAnalysisStats: String? = null,       // "42 malicious, 28 harmless, ..."

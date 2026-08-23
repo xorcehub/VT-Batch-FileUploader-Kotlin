@@ -209,7 +209,8 @@ class SideEffects(
                             totalVotes = cached.totalVotesHarmless?.let { h ->
                                 cached.totalVotesMalicious?.let { m -> Votes(h, m) }
                             },
-                            engineHits = cached.engineHits
+                            engineHits = cached.engineHits,
+                            fromCache = true
                         ))
                     } else {
                         newCount++
@@ -306,10 +307,11 @@ class SideEffects(
                         sha256Hash = sha256,
                         analysisUrl = sha256?.let { "${VT_FILE_URL}$it" } ?: entry.analysisUrl,
                         detectionRatio = stats?.ratio,
-                        lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
+                        lastAnalysisDate = lastDate?.let { formatTimestamp(it) },
+                        fromCache = false
                     ).withDetails(details)
                 } else {
-                    entry.copy(status = FileStatus.HASHED_NOT_FOUND)
+                    entry.copy(status = FileStatus.HASHED_NOT_FOUND, fromCache = false)
                 }
 
                 dispatch(AppIntent.FileProcessed(entry.path, updatedEntry))

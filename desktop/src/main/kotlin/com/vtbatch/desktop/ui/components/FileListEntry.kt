@@ -115,6 +115,20 @@ fun FileListEntry(
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
+                        if (file.fromCache) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                                modifier = Modifier.padding(end = 4.dp)
+                            ) {
+                                Text(
+                                    text = "cached",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(2.dp))
