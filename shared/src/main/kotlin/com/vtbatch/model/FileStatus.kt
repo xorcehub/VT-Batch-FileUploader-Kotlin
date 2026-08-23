@@ -15,7 +15,25 @@ enum class FileStatus {
     HASH_FAILED,          // Failed to compute file hash
     UPLOAD_FAILED,        // Failed to upload file to VT
     QUEUED_FOR_RECHECK,   // Scheduled for re-analysis
-    RECHECKING            // Currently re-checking analysis status
+    RECHECKING;           // Currently re-checking analysis status
+
+    /** Human-readable status shown in the UI. */
+    val displayName: String
+        get() = when (this) {
+            PENDING -> "Pending"
+            HASHING -> "Hashing…"
+            HASHED_FOUND -> "Found on VirusTotal"
+            HASHED_NOT_FOUND -> "Not on VirusTotal — upload needed"
+            UPLOADING -> "Uploading…"
+            UPLOADED_AWAITING -> "Waiting for analysis"
+            ANALYSIS_COMPLETE -> "Analysis complete"
+            ANALYSIS_TIMEOUT -> "Analysis timed out — try again"
+            ERROR -> "Error"
+            HASH_FAILED -> "Hash failed"
+            UPLOAD_FAILED -> "Upload failed"
+            QUEUED_FOR_RECHECK -> "Recheck queued"
+            RECHECKING -> "Rechecking…"
+        }
 }
 
 /** Named representation of community votes on a file. */

@@ -109,7 +109,7 @@ fun FileListEntry(
                             modifier = Modifier.padding(end = 4.dp)
                         ) {
                             Text(
-                                text = file.status.name,
+                                text = file.status.displayName,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = accentColor,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
