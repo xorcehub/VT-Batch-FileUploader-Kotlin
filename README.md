@@ -8,7 +8,7 @@ Checking a folder of downloads or attachments one file at a time on VirusTotal i
 ## Disclaimer
 
 - **Scores aren't verdicts.** A 0-detection file isn't guaranteed safe (it may simply be new or evasive), and a 1–2 detection file isn't automatically malicious (engines false-positive legitimate software). Use results for triage; sandbox anything suspicious before running it.
-- **Respect the VirusTotal Terms of Service and public-API limits** (500 requests/day, 4 requests/minute). Multiple API keys are for switching between valid accounts, not for circumventing quotas.
+- **Respect the VirusTotal Terms of Service and public-API limits** (500 requests/day shared between lookups and uploads, 4 requests/minute). Quota is counted per request — file size does not matter (only a per-file size cap of 32 MB on the normal endpoint, 650 MB via `/files/upload_url`). Multiple API keys are for switching between valid accounts, not for circumventing quotas.
 
 ## Features
 
@@ -148,7 +148,7 @@ User action → Intent → Reducer(oldState, intent) → newState → UI observe
 
 ### Hash-first design
 
-The core design: **never upload before checking the hash.** Hash lookups against VT are cheap and rate-friendly; uploads are the expensive, quota-burning operation. The flow is *hash → lookup → upload only if unknown*, and the local JSON cache extends this across sessions.
+The core design: **never upload before checking the hash.** Uploads and hash lookups draw from the same daily request pool — but an unknown file can only be resolved by uploading it, so the cache-first lookup avoids spending requests on known files entirely. The flow is *hash → lookup → upload only if unknown*, and the local JSON cache extends this across sessions.
 
 ## Packaging
 
