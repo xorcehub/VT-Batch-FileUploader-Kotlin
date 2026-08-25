@@ -968,17 +968,13 @@ class SideEffects(
         }
 
         dispatch(AppIntent.LogMessage("Updating ${files.size} file(s)..."))
-        val updated = mutableListOf<FileEntry>()
         // Per-pass cache batch: accumulated through the loop and flushed once via
         // saveEntries (one atomic read-modify-write) instead of saveEntry-per-file
         // (which did a full load + full rewrite per file -> O(n^2) I/O).
         val cacheBatch = mutableMapOf<String, QuotaManager.CacheEntry>()
 
         for (entry in files) {
-            if (entry.md5Hash == null) {
-                updated.add(entry)
-                continue
-            }
+            if (entry.md5Hash == null) continue
 
             try {
                 val hash = entry.md5Hash!!
@@ -992,21 +988,22 @@ class SideEffects(
                     val lastDate = VTResponseParser.extractLastAnalysisDate(result)
                     val details = VTResponseParser.extractFileDetails(result)
 
-                    updated.add(entry.copy(
+                    // Update in-place via FileProcessed (updateByPath) so
+                    // unfiltered files are preserved.
+                    dispatch(AppIntent.FileProcessed(entry.path, entry.copy(
                         status = FileStatus.HASHED_FOUND,
                         sha256Hash = sha256,
                         analysisUrl = sha256?.let { "${VT_FILE_URL}$it" },
                         detectionRatio = stats?.ratio,
                         lastAnalysisDate = lastDate?.let { formatTimestamp(it) }
-                    ).withDetails(details))
+                    ).withDetails(details)))
 
                     // Stage to the per-pass batch — flushed once after the loop.
                     cacheBatch[hash] = buildCacheEntry(entry, sha256, lastDate, stats, details)
                 } else {
-                    updated.add(entry.copy(status = FileStatus.HASHED_NOT_FOUND))
+                    dispatch(AppIntent.FileProcessed(entry.path, entry.copy(status = FileStatus.HASHED_NOT_FOUND)))
                 }
             } catch (e: Exception) {
-                updated.add(entry)
                 dispatch(AppIntent.LogMessage("  Error updating ${entry.fileName}: ${e.message}"))
             }
         }
@@ -1016,7 +1013,6 @@ class SideEffects(
             if (cacheBatch.isNotEmpty()) container.quotaManager.saveEntries(cacheBatch)
         }
 
-        dispatch(AppIntent.FilesUpdated(updated))
         dispatch(AppIntent.LogMessage("Update complete."))
     }
 
