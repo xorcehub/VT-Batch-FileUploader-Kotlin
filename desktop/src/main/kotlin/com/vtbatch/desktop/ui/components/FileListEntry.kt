@@ -142,7 +142,7 @@ fun FileListEntry(
                         )
                         file.md5Hash?.let { hash ->
                             Text(
-                                text = "  |  Hash: ${hash.take(16)}...",
+                                text = "  |  Hash: $hash",
                                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -318,7 +318,7 @@ private fun FileDetailPanel(file: FileEntry, accentColor: androidx.compose.ui.gr
                 file.typeDescription?.let { DetailRow("File Type", it) }
                 file.meaningfulName?.let { DetailRow("Name", it) }
                 file.sha256Hash?.let { hash ->
-                    DetailRow("SHA256", hash.take(16) + "...", fontFamily = FontFamily.Monospace)
+                    DetailRow("SHA256", hash, fontFamily = FontFamily.Monospace)
                 }
                 file.tags?.takeIf { it.isNotEmpty() }?.let { tags ->
                     DetailRow("Tags", tags.take(5).joinToString(", ") + if (tags.size > 5) " +" else "")
