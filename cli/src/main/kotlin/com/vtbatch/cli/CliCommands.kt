@@ -173,9 +173,12 @@ class ScanCommand : Callable<Int> {
                 if (computeHashes && api != null) {
                     try {
                         out.progress("Hashing ${file.name}...")
-                        entry["md5_hash"] = api.calculateMd5(filePath)
+                        val (md5, sha256) = api.calculateHashes(filePath)
+                        entry["md5_hash"] = md5
+                        entry["sha256_hash"] = sha256
                     } catch (e: Exception) {
                         entry["md5_hash"] = null
+                        entry["sha256_hash"] = null
                         entry["error"] = e.message
                     }
                 }
@@ -212,11 +215,13 @@ private fun fullCacheEntry(
 ): QuotaManager.CacheEntry {
     val details = VTResponseParser.extractFileDetails(fileObj)
     val stats = VTResponseParser.extractDetectionStats(fileObj)
+    val sha256 = VTResponseParser.extractSha256(fileObj)
     return QuotaManager.CacheEntry(
         filename = filePath?.let { File(it).name } ?: details?.meaningfulName,
         size = filePath?.let { File(it).length() },
         path = filePath,
-        url = VTResponseParser.extractSha256(fileObj)?.let { "https://www.virustotal.com/gui/file/$it" },
+        sha256 = sha256,
+        url = sha256?.let { "https://www.virustotal.com/gui/file/$it" },
         lastScan = java.time.LocalDateTime.now().toString(),
         status = status,
         lastAnalysisStats = stats?.description ?: details?.lastAnalysisStats,

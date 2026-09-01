@@ -155,6 +155,10 @@ class SideEffects(
                 var cachedCount = 0
                 var totalBytesHashed = 0L
                 val startTime = System.currentTimeMillis()
+                // Per-pass cache batch: accumulated through the loop and flushed once via
+                // saveEntries (one atomic read-modify-write) instead of saveEntry-per-file
+                // (which did a full load + full rewrite per file -> O(n^2) I/O).
+                val cacheBatch = mutableMapOf<String, QuotaManager.CacheEntry>()
 
                 for ((index, filePath) in allSuspicious.withIndex()) {
                     val file = File(filePath)
@@ -163,9 +167,10 @@ class SideEffects(
                     val sizeBytes = file.length()
                     val sizeFormatted = formatFileSize(sizeBytes)
 
-                    // Compute MD5
-                    val md5 = try {
-                        withContext(Dispatchers.IO) { api?.calculateMd5(filePath) }
+                    // Compute MD5 + SHA256 in a single pass so SHA256 is
+                    // available immediately (not only after a VT report)
+                    val hashes = try {
+                        withContext(Dispatchers.IO) { api?.calculateHashes(filePath) }
                     } catch (e: Exception) {
                         logger.warn { "Failed to hash $filePath: ${e.message}" }
                         dispatch(AppIntent.LogMessage("  Warning: could not hash ${file.name}"))
@@ -180,11 +185,19 @@ class SideEffects(
                         continue
                     }
 
+                    val md5 = hashes?.first
+                    val sha256 = hashes?.second
+
                     // Check cache
                     val cached = cache[md5]
                     if (cached != null) {
                         cachedCount++
                         container.telemetry.recordCacheHit()
+                        // Backfill sha256 into entries written before it was stored;
+                        // batched write after the loop, only when something changed
+                        if (md5 != null && cached.sha256 != sha256) {
+                            cacheBatch[md5] = cached.copy(sha256 = sha256)
+                        }
                         val cachedStatus = if (cached.status == "HASHED_NOT_FOUND")
                             FileStatus.HASHED_NOT_FOUND else FileStatus.HASHED_FOUND
                         files.add(FileEntry(
@@ -193,6 +206,7 @@ class SideEffects(
                             fileSizeBytes = sizeBytes,
                             fileSizeFormatted = sizeFormatted,
                             md5Hash = md5,
+                            sha256Hash = sha256 ?: cached.sha256,
                             status = cachedStatus,
                             analysisUrl = cached.url,
                             detectionRatio = cached.detections,
@@ -221,6 +235,7 @@ class SideEffects(
                             fileSizeBytes = sizeBytes,
                             fileSizeFormatted = sizeFormatted,
                             md5Hash = md5,
+                            sha256Hash = sha256,
                             status = FileStatus.PENDING
                         ))
                     }
@@ -237,6 +252,9 @@ class SideEffects(
                         elapsedFormatted = String.format("%.1fs", elapsed)
                     ))
                 }
+
+                // Flush sha256 backfill (no-op when nothing changed)
+                withContext(Dispatchers.IO) { container.quotaManager.saveEntries(cacheBatch) }
 
                 val elapsed = ((System.currentTimeMillis() - startTime) / 1000.0)
                 val summary = buildString {
@@ -409,6 +427,7 @@ class SideEffects(
                             filename = entry.fileName,
                             size = entry.fileSizeBytes,
                             path = entry.path,
+                            sha256 = entry.sha256Hash,
                             lastScan = java.time.LocalDateTime.now().toString(),
                             status = "HASHED_NOT_FOUND"
                         )
@@ -1311,29 +1330,34 @@ class SideEffects(
         lastDate: Long?,
         stats: VTResponseParser.DetectionStats?,
         details: VTResponseParser.FileDetails?
-    ): QuotaManager.CacheEntry = QuotaManager.CacheEntry(
-        filename = entry.fileName,
-        size = entry.fileSizeBytes,
-        path = entry.path,
-        url = sha256?.let { "${VT_FILE_URL}$it" } ?: entry.analysisUrl,
-        lastScan = LocalDateTime.now().toString(),
-        status = "found",
-        lastAnalysisStats = stats?.description ?: details?.lastAnalysisStats,
-        lastAnalysisDate = lastDate,
-        detections = stats?.ratio,
-        detectionCount = details?.detectionCount,
-        suggestedThreatLabel = details?.suggestedThreatLabel,
-        typeDescription = details?.typeDescription,
-        tags = details?.tags?.joinToString(","),
-        meaningfulName = details?.meaningfulName,
-        timesSubmitted = details?.timesSubmitted,
-        reputation = details?.reputation,
-        firstSubmissionDate = details?.firstSubmissionDate,
-        lastSubmissionDate = details?.lastSubmissionDate,
-        totalVotesHarmless = details?.totalVotesHarmless,
-        totalVotesMalicious = details?.totalVotesMalicious,
-        engineHits = details?.engineHits
-    )
+    ): QuotaManager.CacheEntry {
+        // Local hash wins over report-derived (works even for never-on-VT files)
+        val sha = sha256 ?: entry.sha256Hash
+        return QuotaManager.CacheEntry(
+            filename = entry.fileName,
+            size = entry.fileSizeBytes,
+            path = entry.path,
+            sha256 = sha,
+            url = sha?.let { "${VT_FILE_URL}$it" } ?: entry.analysisUrl,
+            lastScan = LocalDateTime.now().toString(),
+            status = "found",
+            lastAnalysisStats = stats?.description ?: details?.lastAnalysisStats,
+            lastAnalysisDate = lastDate,
+            detections = stats?.ratio,
+            detectionCount = details?.detectionCount,
+            suggestedThreatLabel = details?.suggestedThreatLabel,
+            typeDescription = details?.typeDescription,
+            tags = details?.tags?.joinToString(","),
+            meaningfulName = details?.meaningfulName,
+            timesSubmitted = details?.timesSubmitted,
+            reputation = details?.reputation,
+            firstSubmissionDate = details?.firstSubmissionDate,
+            lastSubmissionDate = details?.lastSubmissionDate,
+            totalVotesHarmless = details?.totalVotesHarmless,
+            totalVotesMalicious = details?.totalVotesMalicious,
+            engineHits = details?.engineHits
+        )
+    }
 
 
     private fun formatTimestamp(epochSeconds: Long): String {

@@ -48,6 +48,7 @@ class QuotaManager(
         val size: Long? = null,
         val path: String? = null,
         val url: String? = null,
+        val sha256: String? = null,
         @SerialName("last_scan") val lastScan: String? = null,
         val status: String? = null,
         @SerialName("last_analysis_stats") val lastAnalysisStats: String? = null,

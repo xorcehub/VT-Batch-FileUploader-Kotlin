@@ -300,6 +300,16 @@ class VirusTotalApiTest {
         api.close()
     }
 
+    @Test
+    fun `calculateHashes returns correct md5 and sha256 for known content`() {
+        val api = VirusTotalApi("test-key")
+        val file = tempFile("hashes-test", ".txt", "hello world".toByteArray())
+        val (md5, sha256) = api.calculateHashes(file.absolutePath)
+        assertEquals("5eb63bbbe01eeed093cb22bb8f5acdc3", md5)
+        assertEquals("b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9", sha256)
+        api.close()
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     //  API key header & security
     // ═══════════════════════════════════════════════════════════════════

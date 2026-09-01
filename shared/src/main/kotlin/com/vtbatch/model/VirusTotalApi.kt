@@ -130,22 +130,28 @@ class VirusTotalApi(
     }
 
     /** Calculate MD5 hash of a local file */
-    fun calculateMd5(filePath: String): String {
+    fun calculateMd5(filePath: String): String = calculateHashes(filePath).first
+
+    /** Calculate MD5 and SHA256 hashes of a local file in a single read pass */
+    fun calculateHashes(filePath: String): Pair<String, String> {
         val file = File(filePath)
         if (!file.exists()) throw FileHashError("File not found: $filePath", mapOf("file_path" to filePath))
         if (!file.canRead()) throw FileHashError("Permission denied: $filePath", mapOf("file_path" to filePath))
 
         return try {
-            val digest = MessageDigest.getInstance("MD5")
+            val md5 = MessageDigest.getInstance("MD5")
+            val sha256 = MessageDigest.getInstance("SHA-256")
             file.inputStream().buffered().use { stream ->
-                val buffer = ByteArray(4096)
+                val buffer = ByteArray(64 * 1024)
                 var read = stream.read(buffer)
                 while (read != -1) {
-                    digest.update(buffer, 0, read)
+                    md5.update(buffer, 0, read)
+                    sha256.update(buffer, 0, read)
                     read = stream.read(buffer)
                 }
             }
-            digest.digest().joinToString("") { "%02x".format(it) }
+            fun hex(digest: MessageDigest) = digest.digest().joinToString("") { "%02x".format(it) }
+            hex(md5) to hex(sha256)
         } catch (e: Exception) {
             throw FileHashError("Could not hash file: $filePath", mapOf("file_path" to filePath), e)
         }

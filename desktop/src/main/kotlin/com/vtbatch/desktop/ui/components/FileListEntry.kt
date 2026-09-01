@@ -8,6 +8,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -15,12 +16,22 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vtbatch.desktop.theme.AppColors
@@ -54,227 +65,278 @@ fun FileListEntry(
         ColorTag.NEUTRAL -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(6.dp))
-            .then(
-                if (isFindHighlighted)
-                    Modifier.border(1.5.dp, FindHighlightBorderColor, RoundedCornerShape(6.dp))
-                else Modifier
-            )
-            .clickable { onToggleExpansion(file.path) },
-        colors = CardDefaults.cardColors(
-            containerColor = if (isFindHighlighted)
-                FindHighlightColor.copy(alpha = 0.5f)
-            else
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (isFindHighlighted) 3.dp else 1.dp)
-    ) {
-        Column {
-            // ── Main row (always visible) ─────────────────────────────
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Color indicator bar on the left
-                Box(
-                    modifier = Modifier
-                        .width(4.dp)
-                        .height(48.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(accentColor)
-                )
+    // Right-click context menu: copy hashes / path / VT link.
+    // menuOffset carries the press position so the menu spawns at the cursor
+    // instead of the row's top-left corner (DropdownMenu anchors to parent
+    // top-start; offset shifts from there).
+    var menuExpanded by remember { mutableStateOf(false) }
+    var menuOffset by remember { mutableStateOf(DpOffset.Zero) }
 
-                Spacer(modifier = Modifier.width(12.dp))
-
-                // File info
-                Column(modifier = Modifier.weight(1f)) {
-                    // Line 1: Filename + status badge
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = file.fileName,
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = accentColor.copy(alpha = 0.15f),
-                            modifier = Modifier.padding(end = 4.dp)
-                        ) {
-                            Text(
-                                text = file.status.displayName,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = accentColor,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
+    Box(modifier = modifier) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        val event = awaitPointerEvent()
+                        if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                            // Consume so the row's clickable doesn't also fire on right-click
+                            event.changes.forEach { it.consume() }
+                            // Press position in this node's coords; px -> dp via the
+                            // pointer scope's Density. Card fills the wrapping Box, so
+                            // node coords == menu's anchor (parent) coords. M3 anchors
+                            // the menu at (left, BOTTOM) + offset, so subtract this
+                            // node's height to land the menu top-left at the cursor.
+                            val p = event.changes.first().position
+                            menuOffset = DpOffset(p.x.toDp(), (p.y - size.height).toDp())
+                            menuExpanded = true
                         }
-                        if (file.fromCache) {
+                    }
+                }
+                .then(
+                    if (isFindHighlighted)
+                        Modifier.border(1.5.dp, FindHighlightBorderColor, RoundedCornerShape(6.dp))
+                    else Modifier
+                )
+                .clickable { onToggleExpansion(file.path) },
+            colors = CardDefaults.cardColors(
+                containerColor = if (isFindHighlighted)
+                    FindHighlightColor.copy(alpha = 0.5f)
+                else
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = if (isFindHighlighted) 3.dp else 1.dp)
+        ) {
+            Column {
+                // ── Main row (always visible) ─────────────────────────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Color indicator bar on the left
+                    Box(
+                        modifier = Modifier
+                            .width(4.dp)
+                            .height(48.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(accentColor)
+                    )
+    
+                    Spacer(modifier = Modifier.width(12.dp))
+    
+                    // File info
+                    Column(modifier = Modifier.weight(1f)) {
+                        // Line 1: Filename + status badge
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = file.fileName,
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                                color = accentColor.copy(alpha = 0.15f),
                                 modifier = Modifier.padding(end = 4.dp)
                             ) {
                                 Text(
-                                    text = "cached",
+                                    text = file.status.displayName,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = accentColor,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                            if (file.fromCache) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                                    modifier = Modifier.padding(end = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "cached",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+    
+                        Spacer(modifier = Modifier.height(2.dp))
+    
+                        // Line 2: Size | Hash
+                        Row {
+                            Text(
+                                text = "Size: ${file.fileSizeFormatted}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            file.md5Hash?.let { hash ->
+                                Text(
+                                    text = "  |  Hash: $hash",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+    
+                        // Line 3: Detections (if available)
+                        if (file.detectionRatio != null) {
+                            Text(
+                                text = "Detections: ${file.detectionRatio}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = accentColor
+                            )
+                        }
+    
+                        // Error message
+                        if (file.errorMessage != null) {
+                            Text(
+                                text = "Error: ${file.errorMessage}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AppColors.ErrorRed
+                            )
+                        }
+                    }
+    
+                    // Action buttons — all share the same pill style for a uniform look
+                    val btnColors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    val btnShape = RoundedCornerShape(12.dp)
+                    val btnPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+    
+                    val hasHash = file.md5Hash != null || file.sha256Hash != null
+                    val isRechecking = file.status == FileStatus.QUEUED_FOR_RECHECK ||
+                        file.status == FileStatus.RECHECKING
+    
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        // Recheck: filled button normally, swapped for a spinner while
+                        // queued/rechecking so it can't be double-fired (VT's reanalyse
+                        // endpoint 409s on repeats).
+                        if (hasHash && !isRechecking) {
+                            Button(
+                                onClick = { onRecheck(file.path) },
+                                shape = btnShape,
+                                colors = btnColors,
+                                contentPadding = btnPadding
+                            ) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "Recheck",
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Recheck", style = MaterialTheme.typography.labelMedium)
+                            }
+                        } else if (hasHash && isRechecking) {
+                            // Reserve the Recheck button's footprint and center the spinner in it,
+                            // so Open VT keeps its position instead of collapsing onto the spinner.
+                            Box(
+                                modifier = Modifier.width(96.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+    
+                        // VT link button (if analysis is available)
+                        if (file.analysisUrl != null) {
+                            Button(
+                                onClick = {
+                                    try {
+                                        if (Desktop.isDesktopSupported()) {
+                                            Desktop.getDesktop().browse(URI(file.analysisUrl))
+                                        }
+                                    } catch (_: Exception) { /* ignore browser launch failures */ }
+                                },
+                                shape = btnShape,
+                                colors = btnColors,
+                                contentPadding = btnPadding
+                            ) {
+                                Text("Open VT", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+    
+                        // Separator + remove button — grouped so separator is
+                        // centered in the gap, not governed by spacedBy.
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            // horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(start = 8.dp, end = 8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(1.dp)
+                                    .height(16.dp)
+                                    .background(MaterialTheme.colorScheme.outlineVariant)
+                            )
+                            Button(
+                                onClick = { onRemove(file.path) },
+                                modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 1.dp),
+                                shape = btnShape,
+                                colors = btnColors,
+                                contentPadding = PaddingValues(horizontal = 5.dp, vertical = 5.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Remove file",
+                                    modifier = Modifier.size(14.dp)
                                 )
                             }
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(2.dp))
-
-                    // Line 2: Size | Hash
-                    Row {
-                        Text(
-                            text = "Size: ${file.fileSizeFormatted}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        file.md5Hash?.let { hash ->
-                            Text(
-                                text = "  |  Hash: $hash",
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    // Line 3: Detections (if available)
-                    if (file.detectionRatio != null) {
-                        Text(
-                            text = "Detections: ${file.detectionRatio}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = accentColor
-                        )
-                    }
-
-                    // Error message
-                    if (file.errorMessage != null) {
-                        Text(
-                            text = "Error: ${file.errorMessage}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = AppColors.ErrorRed
-                        )
-                    }
                 }
-
-                // Action buttons — all share the same pill style for a uniform look
-                val btnColors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-                val btnShape = RoundedCornerShape(12.dp)
-                val btnPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-
-                val hasHash = file.md5Hash != null || file.sha256Hash != null
-                val isRechecking = file.status == FileStatus.QUEUED_FOR_RECHECK ||
-                    file.status == FileStatus.RECHECKING
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+    
+                // ── Expandable detail panel ───────────────────────────────
+                AnimatedVisibility(
+                    visible = isExpanded,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
                 ) {
-                    // Recheck: filled button normally, swapped for a spinner while
-                    // queued/rechecking so it can't be double-fired (VT's reanalyse
-                    // endpoint 409s on repeats).
-                    if (hasHash && !isRechecking) {
-                        Button(
-                            onClick = { onRecheck(file.path) },
-                            shape = btnShape,
-                            colors = btnColors,
-                            contentPadding = btnPadding
-                        ) {
-                            Icon(
-                                Icons.Default.Refresh,
-                                contentDescription = "Recheck",
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Recheck", style = MaterialTheme.typography.labelMedium)
-                        }
-                    } else if (hasHash && isRechecking) {
-                        // Reserve the Recheck button's footprint and center the spinner in it,
-                        // so Open VT keeps its position instead of collapsing onto the spinner.
-                        Box(
-                            modifier = Modifier.width(96.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-
-                    // VT link button (if analysis is available)
-                    if (file.analysisUrl != null) {
-                        Button(
-                            onClick = {
-                                try {
-                                    if (Desktop.isDesktopSupported()) {
-                                        Desktop.getDesktop().browse(URI(file.analysisUrl))
-                                    }
-                                } catch (_: Exception) { /* ignore browser launch failures */ }
-                            },
-                            shape = btnShape,
-                            colors = btnColors,
-                            contentPadding = btnPadding
-                        ) {
-                            Text("Open VT", style = MaterialTheme.typography.labelMedium)
-                        }
-                    }
-
-                    // Separator + remove button — grouped so separator is
-                    // centered in the gap, not governed by spacedBy.
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        // horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.padding(start = 8.dp, end = 8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(1.dp)
-                                .height(16.dp)
-                                .background(MaterialTheme.colorScheme.outlineVariant)
-                        )
-                        Button(
-                            onClick = { onRemove(file.path) },
-                            modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 1.dp),
-                            shape = btnShape,
-                            colors = btnColors,
-                            contentPadding = PaddingValues(horizontal = 5.dp, vertical = 5.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "Remove file",
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
-                    }
+                    FileDetailPanel(file = file, accentColor = accentColor)
                 }
-            }
-
-            // ── Expandable detail panel ───────────────────────────────
-            AnimatedVisibility(
-                visible = isExpanded,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
-            ) {
-                FileDetailPanel(file = file, accentColor = accentColor)
             }
         }
+
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+            offset = menuOffset
+        ) {
+            file.md5Hash?.let { CopyItem("Copy MD5", it) { menuExpanded = false } }
+            file.sha256Hash?.let { CopyItem("Copy SHA256", it) { menuExpanded = false } }
+            CopyItem("Copy file name", file.fileName) { menuExpanded = false }
+            CopyItem("Copy file path", file.path) { menuExpanded = false }
+            file.analysisUrl?.let { CopyItem("Copy VT link", it) { menuExpanded = false } }
+        }
     }
+}
+
+/** Context-menu item that copies [value] to the clipboard, then runs [onClose]. */
+@Composable
+private fun CopyItem(label: String, value: String, onClose: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
+    DropdownMenuItem(
+        text = { Text(label) },
+        onClick = {
+            clipboard.setText(AnnotatedString(value))
+            onClose()
+        }
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────

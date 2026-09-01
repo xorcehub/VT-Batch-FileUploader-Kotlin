@@ -169,6 +169,29 @@ class QuotaManagerTest {
         assertEquals("new.exe", loaded["hash1"]?.filename)
     }
 
+    @Test
+    fun `sha256 round-trips through cache and old entries load without it`() {
+        val (manager, file) = tempQuotaManager()
+        val now = LocalDateTime.now().toString()
+        runBlocking {
+            manager.saveEntry("md5a", QuotaManager.CacheEntry(filename = "a.exe", sha256 = "deadbeef", lastScan = now))
+        }
+        assertEquals("deadbeef", manager.loadData()["md5a"]?.sha256)
+
+        // Cache written by an older version (no sha256 field) must still parse
+        file.writeText("""
+        {
+            "md5b": {
+                "filename": "b.exe",
+                "last_scan": "$now"
+            }
+        }
+        """.trimIndent())
+        val loaded = manager.loadData()
+        assertNull(loaded["md5b"]?.sha256)
+        assertEquals("b.exe", loaded["md5b"]?.filename)
+    }
+
     // W5: saveEntries persists a batch in a single read-modify-write and round-trips.
     @Test
     fun `saveEntries persists a batch in one write`() {
