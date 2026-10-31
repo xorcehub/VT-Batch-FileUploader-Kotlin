@@ -3,8 +3,10 @@ name: Build & Test
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -40,3 +42,99 @@ jobs:
         with:
           name: test-reports-${{ matrix.os }}
           path: '**/build/reports/tests/'
+
+  # MSI can only be built on Windows (jpackage cannot cross-compile installers).
+  # windows-latest runners ship WiX 3.x, which jpackage needs. Runs on every push
+  # to main (and manual dispatch) and republishes the rolling "latest" release,
+  # so users always have a current installer without waiting for a version tag.
+  msi:
+    runs-on: windows-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write   # move the "latest" tag and update its release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: temurin
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Monotonic installer version 0.0.<run number>: each new build upgrades
+      # cleanly over the previous "latest" install without a real version tag.
+      - name: Package MSI installer
+        run: ./gradlew :desktop:packageMsi --stacktrace "-PappVersion=0.0.${GITHUB_RUN_NUMBER}"
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: desktop/build/compose/binaries/**/msi/*.msi
+          if-no-files-found: error
+
+      # Fixed asset name so --clobber below replaces the old MSI instead of
+      # piling up one file per build on the release.
+      - name: Normalize MSI file name
+        shell: bash
+        run: |
+          mkdir -p dist
+          MSI=$(find desktop/build/compose/binaries -name '*.msi' | head -n 1)
+          cp "$MSI" dist/VT-Batch-FileUploader-latest.msi
+
+      - name: Move "latest" tag to this commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f latest "$GITHUB_SHA"
+          git push -f origin "refs/tags/latest"
+
+      - name: Update "latest" release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES="Automated build of ${GITHUB_SHA::7} on main (installer version 0.0.${GITHUB_RUN_NUMBER}).
+          Overwritten on every push to main. For stable, versioned releases see the tagged releases."
+          if gh release view latest --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release edit latest --title "Latest build (main)" --notes "$NOTES" --prerelease --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create latest --title "Latest build (main)" --notes "$NOTES" --prerelease --target "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY"
+          fi
+          gh release upload latest --clobber dist/VT-Batch-FileUploader-latest.msi --repo "$GITHUB_REPOSITORY"
+
+  # Publishes the MSI as a permanent GitHub Release asset when a v* tag is
+  # pushed. The tag (e.g. v1.2.3) is passed to Gradle so the installer file is
+  # named after the released version instead of the hardcoded 1.0.0.
+  release:
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write   # required to create the release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: temurin
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Package MSI installer
+        run: ./gradlew :desktop:packageMsi --stacktrace "-PappVersion=${GITHUB_REF_NAME}"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: desktop/build/compose/binaries/**/msi/*.msi
+          generate_release_notes: true

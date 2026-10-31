@@ -23,6 +23,16 @@ java {
 // Compose Multiplatform = JetBrains' extension that makes it work on Desktop too.
 // You write UI as Kotlin functions annotated with @Composable.
 
+// Release version override, used by CI: ./gradlew :desktop:packageMsi -PappVersion=v1.2.3
+// The git tag is passed as-is, so strip the leading "v" and any non-numeric
+// suffix (e.g. v1.2.3-beta -> 1.2.3) — MSI ProductVersion must be purely numeric.
+val appVersion = (findProperty("appVersion") as String?)
+    ?.trim()
+    ?.trimStart('v')
+    ?.takeWhile { it.isDigit() || it == '.' }
+    ?.trimEnd('.')
+    ?.takeIf { it.isNotEmpty() }
+
 dependencies {
     implementation(project(":shared"))
 
@@ -66,7 +76,7 @@ compose.desktop {
             )
 
             packageName = "VT-Batch-FileUploader"
-            packageVersion = "1.0.0"
+            packageVersion = appVersion ?: "1.0.0"
 
             // Ship third-party license texts with every binary distribution
             // (Apache-2.0 §4(b), LGPL/EPL, MIT). Sources: desktop/packaging/common/licenses,
