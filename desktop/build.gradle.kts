@@ -25,13 +25,21 @@ java {
 
 // Release version override, used by CI: ./gradlew :desktop:packageMsi -PappVersion=v1.2.3
 // The git tag is passed as-is, so strip the leading "v" and any non-numeric
-// suffix (e.g. v1.2.3-beta -> 1.2.3) — MSI ProductVersion must be purely numeric.
+// suffix (e.g. v1.2.3-beta -> 1.2.3) — installer versions must be purely
+// numeric. Padded to exactly 3 parts (all target formats require that), and
+// an all-zero result falls back to the default below — e.g. an accidentally
+// empty "0.0." must not fail the build configuration.
 val appVersion = (findProperty("appVersion") as String?)
     ?.trim()
     ?.trimStart('v')
     ?.takeWhile { it.isDigit() || it == '.' }
     ?.trimEnd('.')
     ?.takeIf { it.isNotEmpty() }
+    ?.split('.')
+    ?.take(3)
+    ?.let { it + List(3 - it.size) { "0" } }
+    ?.joinToString(".")
+    ?.takeIf { it != "0.0.0" }
 
 dependencies {
     implementation(project(":shared"))
@@ -76,7 +84,7 @@ compose.desktop {
             )
 
             packageName = "VT-Batch-FileUploader"
-            packageVersion = appVersion ?: "1.0.0"
+            packageVersion = "1.0.0"
 
             // Ship third-party license texts with every binary distribution
             // (Apache-2.0 §4(b), LGPL/EPL, MIT). Sources: desktop/packaging/common/licenses,
@@ -86,6 +94,13 @@ compose.desktop {
             windows {
                 menuGroup = "Xorce"
                 upgradeUuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+                // CI-provided override: rolling "latest" builds use 0.0.<run
+                // number>, v* tags use the tag version. Windows Installer
+                // accepts a leading-zero major, macOS doesn't — so the
+                // override lives here and the global packageVersion above
+                // stays at 1.0.0 for every other format.
+                appVersion?.let { packageVersion = it }
             }
         }
     }

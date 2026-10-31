@@ -67,9 +67,11 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       # Monotonic installer version 0.0.<run number>: each new build upgrades
-      # cleanly over the previous "latest" install without a real version tag.
+      # cleanly over the previous "latest" install without a real version tag,
+      # and stays below any real 1.x release. ${{ }} (not $ENV) so it works in
+      # PowerShell, the default shell on Windows runners.
       - name: Package MSI installer
-        run: ./gradlew :desktop:packageMsi --stacktrace "-PappVersion=0.0.${GITHUB_RUN_NUMBER}"
+        run: ./gradlew :desktop:packageMsi --stacktrace "-PappVersion=0.0.${{ github.run_number }}"
 
       - name: Upload MSI artifact
         uses: actions/upload-artifact@v4
@@ -131,7 +133,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Package MSI installer
-        run: ./gradlew :desktop:packageMsi --stacktrace "-PappVersion=${GITHUB_REF_NAME}"
+        run: ./gradlew :desktop:packageMsi --stacktrace "-PappVersion=${{ github.ref_name }}"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
