@@ -44,13 +44,13 @@ jobs:
           path: '**/build/reports/tests/'
 
   # MSI can only be built on Windows (jpackage cannot cross-compile installers).
-  # windows-latest runners ship WiX 3.x, which jpackage needs. Runs on every push
-  # to main (and manual dispatch) and republishes the rolling "latest" release,
-  # so users always have a current installer without waiting for a version tag.
+  # windows-latest runners ship WiX 3.x, which jpackage needs. Runs only on manual
+  # dispatch from main ("Run workflow" in the Actions tab) and republishes the
+  # rolling "latest" release. Plain pushes to main only build and test.
   msi:
     runs-on: windows-latest
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     permissions:
       contents: write   # move the "latest" tag and update its release
 
