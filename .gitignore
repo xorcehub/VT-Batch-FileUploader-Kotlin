@@ -29,6 +29,8 @@ local.properties
 # Temp Gradle download
 /gradle-*.zip
 
-/docs/
+# docs/ is a local knowledge base; only the convention docs are tracked
+/docs/*
+!/docs/*CONVENTIONS.md
 desktop/suspicious_extensions.json
 desktop/*.json
