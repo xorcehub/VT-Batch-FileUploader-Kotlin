@@ -27,6 +27,7 @@ fun SettingsDialog(
     var analysisMaxRetries by remember { mutableStateOf(effectiveConfig.analysisMaxRetries.toString()) }
     var cacheDurationHours by remember { mutableStateOf(effectiveConfig.cacheDurationHours.toString()) }
     var shortTimeout by remember { mutableStateOf(effectiveConfig.shortTimeout.toString()) }
+    var maxScanSizeMb by remember { mutableStateOf(effectiveConfig.maxScanSizeMb.toString()) }
 
     if (isVisible) {
         AlertDialog(
@@ -50,6 +51,7 @@ fun SettingsDialog(
                             "analysisMaxRetries" -> analysisMaxRetries
                             "cacheDurationHours" -> cacheDurationHours
                             "shortTimeout" -> shortTimeout
+                            "maxScanSizeMb" -> maxScanSizeMb
                             else -> ""
                         }
                         val onValueChange: (String) -> Unit = when (meta.fieldName) {
@@ -58,6 +60,7 @@ fun SettingsDialog(
                             "analysisMaxRetries" -> { v: String -> analysisMaxRetries = v }
                             "cacheDurationHours" -> { v: String -> cacheDurationHours = v }
                             "shortTimeout" -> { v: String -> shortTimeout = v }
+                            "maxScanSizeMb" -> { v: String -> maxScanSizeMb = v }
                             else -> { _: String -> }
                         }
                         SettingsField(
@@ -90,6 +93,9 @@ fun SettingsDialog(
                             },
                             shortTimeout = shortTimeout.toIntOrNull()?.let { v ->
                                 if (v != AppConfig.USER_FACING_FIELDS.find { it.fieldName == "shortTimeout" }?.default) v else null
+                            },
+                            maxScanSizeMb = maxScanSizeMb.toIntOrNull()?.takeIf { it > 0 }?.let { v ->
+                                if (v != AppConfig.USER_FACING_FIELDS.find { it.fieldName == "maxScanSizeMb" }?.default) v else null
                             },
                         ))
                     }

@@ -199,6 +199,7 @@ Environment variables:
 | `VT_API_KEY` | VirusTotal API key |
 | `VT_ANALYSIS_POLL_INTERVAL` | Seconds between VT analysis polls |
 | `VT_SUSPICIOUS_EXTENSIONS` | Comma-separated extensions to scan (e.g. `.exe,.dll,.ps1`) |
+| `VT_MAX_SCAN_SIZE_MB` | Files larger than this (MB) are skipped without hashing or lookup (default 650, VirusTotal's upload limit) |
 
 ## License
 

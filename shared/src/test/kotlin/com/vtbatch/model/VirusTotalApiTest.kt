@@ -5,6 +5,12 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import java.io.File
 import java.net.ConnectException
@@ -274,7 +280,7 @@ class VirusTotalApiTest {
     // ═══════════════════════════════════════════════════════════════════
 
     @Test
-    fun `calculateMd5 throws FileHashError when file not found`() {
+    fun `calculateMd5 throws FileHashError when file not found`() = runTest {
         val api = VirusTotalApi("test-key")
         assertFailsWith<FileHashError> {
             api.calculateMd5("/nonexistent/file.bin")
@@ -283,7 +289,7 @@ class VirusTotalApiTest {
     }
 
     @Test
-    fun `calculateMd5 returns correct hash for known content`() {
+    fun `calculateMd5 returns correct hash for known content`() = runTest {
         val api = VirusTotalApi("test-key")
         val file = tempFile("md5-test", ".txt", "hello world".toByteArray())
         val md5 = api.calculateMd5(file.absolutePath)
@@ -292,7 +298,7 @@ class VirusTotalApiTest {
     }
 
     @Test
-    fun `calculateMd5 returns correct hash for empty file`() {
+    fun `calculateMd5 returns correct hash for empty file`() = runTest {
         val api = VirusTotalApi("test-key")
         val file = tempFile("md5-empty", ".txt", ByteArray(0))
         val md5 = api.calculateMd5(file.absolutePath)
@@ -301,12 +307,70 @@ class VirusTotalApiTest {
     }
 
     @Test
-    fun `calculateHashes returns correct md5 and sha256 for known content`() {
+    fun `calculateHashes returns correct md5 and sha256 for known content`() = runTest {
         val api = VirusTotalApi("test-key")
         val file = tempFile("hashes-test", ".txt", "hello world".toByteArray())
         val (md5, sha256) = api.calculateHashes(file.absolutePath)
         assertEquals("5eb63bbbe01eeed093cb22bb8f5acdc3", md5)
         assertEquals("b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9", sha256)
+        api.close()
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Scan size cap + cancellation (large-file hashing)
+    // ═══════════════════════════════════════════════════════════════════
+
+    private val oneMiB = 1024 * 1024
+
+    @Test
+    fun `calculateHashes rejects a file one byte over the cap without reading it`() = runTest {
+        val api = VirusTotalApi("test-key", config = AppConfig(maxScanSizeMb = 1))
+        val file = tempFile("over-cap", ".bin", ByteArray(oneMiB + 1))
+        var progressCalls = 0
+        val e = assertFailsWith<FileTooLargeError> {
+            api.calculateHashes(file.absolutePath) { _, _ -> progressCalls++ }
+        }
+        assertEquals(oneMiB + 1L, e.sizeBytes)
+        assertEquals(oneMiB.toLong(), e.limitBytes)
+        assertEquals(0, progressCalls, "an over-cap file must not be read at all")
+        api.close()
+    }
+
+    @Test
+    fun `calculateHashes hashes a file exactly at the cap`() = runTest {
+        val api = VirusTotalApi("test-key", config = AppConfig(maxScanSizeMb = 1))
+        val file = tempFile("at-cap", ".bin", ByteArray(oneMiB))
+        var lastProgress = 0L to 0L
+        val (md5, sha256) = api.calculateHashes(file.absolutePath) { read, total -> lastProgress = read to total }
+        assertEquals("b6d81b360a5672d80c27430f39153e2c", md5)
+        assertEquals(64, sha256.length)
+        assertEquals(oneMiB.toLong() to oneMiB.toLong(), lastProgress, "progress reaches the full size")
+        api.close()
+    }
+
+    @Test
+    fun `cancelling during hashing stops the read and is not reported as a hash failure`() = runBlocking {
+        val api = VirusTotalApi("test-key", config = AppConfig(maxScanSizeMb = 10))
+        val file = tempFile("cancel", ".bin", ByteArray(4 * oneMiB))
+        var bytesSeen = 0L
+        var thrown: Throwable? = null
+        lateinit var job: Job
+        job = launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
+            try {
+                api.calculateHashes(file.absolutePath) { read, _ ->
+                    bytesSeen = read
+                    if (read >= 64 * 1024) job.cancel()
+                }
+            } catch (t: Throwable) {
+                thrown = t
+                throw t
+            }
+        }
+        job.start()
+        job.join()
+        assertTrue(job.isCancelled)
+        assertTrue(thrown is CancellationException, "expected CancellationException, got $thrown")
+        assertTrue(bytesSeen < file.length(), "read stopped early: $bytesSeen of ${file.length()} bytes")
         api.close()
     }
 

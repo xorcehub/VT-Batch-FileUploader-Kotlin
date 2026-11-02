@@ -84,6 +84,12 @@ class FileEntryColorTagTest {
     }
 
     @Test
+    fun `NEUTRAL tag and explicit label for TOO_LARGE status`() {
+        assertEquals(ColorTag.NEUTRAL, entry(status = FileStatus.TOO_LARGE).colorTag)
+        assertEquals("Too large for VirusTotal — skipped", FileStatus.TOO_LARGE.displayName)
+    }
+
+    @Test
     fun `NEUTRAL tag for malformed detection ratio`() {
         val e = entry(detectionRatio = "invalid")
         assertEquals(ColorTag.NEUTRAL, e.colorTag)

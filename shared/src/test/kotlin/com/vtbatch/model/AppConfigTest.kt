@@ -35,6 +35,65 @@ class AppConfigTest {
         maxHashLength = maxHashLength
     )
 
+    // === Scan size cap ===
+
+    @Test
+    fun `scan size cap defaults to the VirusTotal upload limit`() {
+        // Skip when the env override is set on this machine.
+        if (System.getenv("VT_MAX_SCAN_SIZE_MB") != null) return
+        assertEquals(MAX_FILE_SIZE_MB, AppConfig().maxScanSizeMb)
+    }
+
+    @Test
+    fun `isTooLargeToScan is strict greater-than at the byte boundary`() {
+        val config = AppConfig(maxScanSizeMb = 2)
+        val cap = 2L * 1024 * 1024
+        assertEquals(cap, config.maxScanSizeBytes)
+        assertTrue(!config.isTooLargeToScan(cap), "a file exactly at the cap is scanned")
+        assertTrue(config.isTooLargeToScan(cap + 1), "one byte over the cap is skipped")
+    }
+
+    // Guards the Long arithmetic in maxScanSizeBytes: in Int, 4096 * 1024 * 1024
+    // wraps to 0 and 3000 MB to a negative number, which would mark EVERY file
+    // as too large once a user raises the cap past 2047 MB.
+    @Test
+    fun `maxScanSizeBytes does not overflow above 2047 MB`() {
+        assertEquals(4_294_967_296L, AppConfig(maxScanSizeMb = 4096).maxScanSizeBytes)
+        assertEquals(3_145_728_000L, AppConfig(maxScanSizeMb = 3000).maxScanSizeBytes)
+        assertEquals(Int.MAX_VALUE * 1024L * 1024L, AppConfig(maxScanSizeMb = Int.MAX_VALUE).maxScanSizeBytes)
+    }
+
+    @Test
+    fun `isTooLargeToScan handles file sizes beyond the Int range`() {
+        val threeGiB = 3L * 1024 * 1024 * 1024
+        val fiveGiB = 5L * 1024 * 1024 * 1024
+        val cap4096 = AppConfig(maxScanSizeMb = 4096)
+        assertTrue(!cap4096.isTooLargeToScan(threeGiB), "3 GiB is under a 4096 MB cap")
+        assertTrue(cap4096.isTooLargeToScan(fiveGiB), "5 GiB is over a 4096 MB cap")
+    }
+
+    @Test
+    fun `rejects non-positive maxScanSizeMb`() {
+        assertFailsWith<IllegalArgumentException> { AppConfig(maxScanSizeMb = 0) }
+        assertFailsWith<IllegalArgumentException> { AppConfig(maxScanSizeMb = -5) }
+    }
+
+    @Test
+    fun `resolve takes maxScanSizeMb from settings unless the env var is set`() {
+        val (config, overridden) = AppConfig.resolve(UserSettings(maxScanSizeMb = 100))
+        if (System.getenv("VT_MAX_SCAN_SIZE_MB") != null) {
+            assertTrue("maxScanSizeMb" in overridden)
+        } else {
+            assertEquals(100, config.maxScanSizeMb)
+            assertTrue("maxScanSizeMb" !in overridden)
+        }
+    }
+
+    @Test
+    fun `maxScanSizeMb is a user-facing setting`() {
+        assertTrue(AppConfig.USER_FACING_FIELDS.any { it.fieldName == "maxScanSizeMb" && it.envVar == "VT_MAX_SCAN_SIZE_MB" })
+    }
+
     // === Default values ===
 
     @Test

@@ -22,6 +22,7 @@ data class UserSettings(
     val analysisMaxRetries: Int? = null,
     val cacheDurationHours: Int? = null,
     val shortTimeout: Int? = null,
+    val maxScanSizeMb: Int? = null,
 )
 
 /**
