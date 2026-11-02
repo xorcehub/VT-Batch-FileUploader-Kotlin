@@ -86,6 +86,18 @@ class FileHashError(
     originalError: Throwable? = null
 ) : FileProcessingError(message, context, originalError)
 
+/**
+ * File exceeds the configured scan cap (AppConfig.maxScanSizeMb); it was not
+ * hashed and must not be looked up or uploaded.
+ */
+class FileTooLargeError(
+    message: String,
+    val sizeBytes: Long,
+    val limitBytes: Long,
+    context: Map<String, Any> = emptyMap(),
+    originalError: Throwable? = null
+) : FileProcessingError(message, context, originalError)
+
 class FileUploadError(
     message: String,
     context: Map<String, Any> = emptyMap(),

@@ -19,8 +19,11 @@ const val DEFAULT_TIMEOUT = 30
 const val SHORT_TIMEOUT = 15
 const val LONG_TIMEOUT = 60
 
-// Retry configuration
+// VirusTotal's maximum upload size. Also the default cap for hashing/lookup
+// (maxScanSizeMb): a file VT can't accept is not worth reading in full.
 const val MAX_FILE_SIZE_MB = 650
+
+// Retry configuration
 const val MAX_RETRIES = 3
 const val RETRY_DELAY = 1.0
 const val RETRY_BACKOFF = 2.0
@@ -96,6 +99,9 @@ data class AppConfig(
     // Upload
     val largeFileThreshold: Int = envInt("VT_LARGE_FILE_THRESHOLD", LARGE_FILE_THRESHOLD),
 
+    // Files above this size are not hashed or looked up (see isTooLargeToScan).
+    val maxScanSizeMb: Int = envInt("VT_MAX_SCAN_SIZE_MB", MAX_FILE_SIZE_MB),
+
     // Analysis polling
     val analysisPollInterval: Int = envInt("VT_ANALYSIS_POLL_INTERVAL", ANALYSIS_POLL_INTERVAL),
     val analysisMaxRetries: Int = envInt("VT_ANALYSIS_MAX_RETRIES", ANALYSIS_MAX_RETRIES),
@@ -131,6 +137,7 @@ data class AppConfig(
         if (longTimeout <= 0) errors.add("longTimeout must be positive, got $longTimeout")
         if (rateLimitPerMinute < 0) errors.add("rateLimitPerMinute must be non-negative, got $rateLimitPerMinute")
         if (largeFileThreshold <= 0) errors.add("largeFileThreshold must be positive, got $largeFileThreshold")
+        if (maxScanSizeMb <= 0) errors.add("maxScanSizeMb must be positive, got $maxScanSizeMb")
         if (analysisPollInterval <= 0) errors.add("analysisPollInterval must be positive, got $analysisPollInterval")
         if (analysisMaxRetries <= 0) errors.add("analysisMaxRetries must be positive, got $analysisMaxRetries")
         if (analysisInitialDelay < 0) errors.add("analysisInitialDelay must be non-negative, got $analysisInitialDelay")
@@ -150,6 +157,15 @@ data class AppConfig(
 
     /** Minimum seconds between requests to respect rate limit */
     val minRequestInterval: Double get() = if (rateLimitPerMinute <= 0) 0.0 else 60.0 / rateLimitPerMinute
+
+    /** Largest file size (bytes) that is still hashed and looked up. */
+    val maxScanSizeBytes: Long get() = maxScanSizeMb * 1024L * 1024L
+
+    /**
+     * True when a file is too large to hash/look up. Checked BEFORE hashing so a
+     * multi-GB file is never read in full and never spends a lookup request.
+     */
+    fun isTooLargeToScan(sizeBytes: Long): Boolean = sizeBytes > maxScanSizeBytes
 
     /** Cache duration in seconds */
     val cacheDurationSeconds: Int get() = cacheDurationHours * 3600
@@ -173,6 +189,7 @@ data class AppConfig(
             FieldMeta("analysisMaxRetries", "VT_ANALYSIS_MAX_RETRIES", ANALYSIS_MAX_RETRIES, "Analysis Max Retries"),
             FieldMeta("cacheDurationHours", "VT_CACHE_DURATION_HOURS", CACHE_DURATION_HOURS, "Cache Duration", "hours"),
             FieldMeta("shortTimeout", "VT_SHORT_TIMEOUT", SHORT_TIMEOUT, "API Request Timeout"),
+            FieldMeta("maxScanSizeMb", "VT_MAX_SCAN_SIZE_MB", MAX_FILE_SIZE_MB, "Max File Size to Scan", "MB"),
         )
 
         /**
@@ -194,6 +211,7 @@ data class AppConfig(
                     "analysisMaxRetries" -> settings.analysisMaxRetries
                     "cacheDurationHours" -> settings.cacheDurationHours
                     "shortTimeout" -> settings.shortTimeout
+                    "maxScanSizeMb" -> settings.maxScanSizeMb
                     else -> null
                 }
                 return settingsVal ?: default
@@ -205,6 +223,7 @@ data class AppConfig(
                 analysisMaxRetries = resolveInt("analysisMaxRetries", "VT_ANALYSIS_MAX_RETRIES", ANALYSIS_MAX_RETRIES),
                 cacheDurationHours = resolveInt("cacheDurationHours", "VT_CACHE_DURATION_HOURS", CACHE_DURATION_HOURS),
                 shortTimeout = resolveInt("shortTimeout", "VT_SHORT_TIMEOUT", SHORT_TIMEOUT),
+                maxScanSizeMb = resolveInt("maxScanSizeMb", "VT_MAX_SCAN_SIZE_MB", MAX_FILE_SIZE_MB),
             )
             return config to overriddenFields
         }

@@ -157,22 +157,32 @@ class ScanCommand : Callable<Int> {
         try {
             val fileList = mutableListOf<Map<String, Any?>>()
             var totalSize = 0L
+            val config = AppConfig.default
 
             for (filePath in allFiles) {
                 val file = File(filePath)
                 val size = if (file.exists()) file.length() else 0L
                 totalSize += size
+                // Same size gate as the GUI: over the cap, the file is never hashed.
+                val tooLarge = config.isTooLargeToScan(size)
 
                 val entry = mutableMapOf<String, Any?>(
                     "path" to filePath,
                     "size" to size,
-                    "extension" to file.extension
+                    "extension" to file.extension,
+                    "too_large" to tooLarge
                 )
 
-                if (computeHashes && api != null) {
+                if (computeHashes && api != null && tooLarge) {
+                    entry["md5_hash"] = null
+                    entry["sha256_hash"] = null
+                    entry["skipped"] = true
+                    entry["reason"] = "too_large"
+                    entry["error"] = "File too large to scan (limit ${config.maxScanSizeMb} MB)"
+                } else if (computeHashes && api != null) {
                     try {
                         out.progress("Hashing ${file.name}...")
-                        val (md5, sha256) = api.calculateHashes(filePath)
+                        val (md5, sha256) = runBlocking { api.calculateHashes(filePath) }
                         entry["md5_hash"] = md5
                         entry["sha256_hash"] = sha256
                     } catch (e: Exception) {
@@ -263,7 +273,7 @@ class CheckCommand : Callable<Int> {
             // Determine hash
             val hash = if (filePath != null) {
                 out.progress("Computing hash for $filePath...")
-                api.calculateMd5(filePath!!)
+                runBlocking { api.calculateMd5(filePath!!) }
             } else if (hashValue != null) {
                 InputValidator.validateHash(hashValue!!)
             } else {
@@ -376,7 +386,7 @@ class UploadCommand : Callable<Int> {
                 try {
                     // Compute hash
                     out.progress("Hashing ${file.name}...")
-                    val md5 = api.calculateMd5(filePath)
+                    val md5 = runBlocking { api.calculateMd5(filePath) }
 
                     // Check if already on VT (unless --force)
                     if (!force) {
@@ -457,6 +467,13 @@ class UploadCommand : Callable<Int> {
 
                     results.add(entry)
                     uploaded++
+                } catch (e: FileTooLargeError) {
+                    // Rejected before hashing: no lookup, no upload attempt.
+                    results.add(mapOf(
+                        "path" to filePath, "uploaded" to false,
+                        "reason" to "too_large", "error" to e.message
+                    ))
+                    failed++
                 } catch (e: Exception) {
                     results.add(mapOf("path" to filePath, "uploaded" to false, "error" to (e.message ?: "Unknown")))
                     failed++
@@ -508,7 +525,7 @@ class ReanalyzeCommand : Callable<Int> {
         return try {
             val hash = if (filePath != null) {
                 out.progress("Computing hash for $filePath...")
-                api.calculateMd5(filePath!!)
+                runBlocking { api.calculateMd5(filePath!!) }
             } else if (hashValue != null) {
                 hashValue!!
             } else {

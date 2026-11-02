@@ -62,6 +62,24 @@ class SettingsStoreTest {
     }
 
     @Test
+    fun `maxScanSizeMb round-trips through settings json`() {
+        val (store, dir) = createStore()
+        store.save(UserSettings(maxScanSizeMb = 2048))
+        assertEquals(2048, store.load().maxScanSizeMb)
+        cleanup(dir)
+    }
+
+    @Test
+    fun `settings json written before maxScanSizeMb existed still loads`() {
+        val (store, dir) = createStore()
+        File(dir, "settings.json").writeText("""{"analysisPollInterval": 20}""")
+        val loaded = store.load()
+        assertEquals(20, loaded.analysisPollInterval, "existing values must survive the new field")
+        assertNull(loaded.maxScanSizeMb, "missing field means: use the default")
+        cleanup(dir)
+    }
+
+    @Test
     fun `save creates directory if missing`() {
         val dir = File(System.getProperty("java.io.tmpdir"), "vtbatch-new-settings-${System.nanoTime()}")
         assertTrue(!dir.exists())

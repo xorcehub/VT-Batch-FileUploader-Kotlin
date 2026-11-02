@@ -153,12 +153,37 @@ class SideEffects(
                 val files = mutableListOf<FileEntry>()
                 var newCount = 0
                 var cachedCount = 0
+                var tooLargeCount = 0
                 var totalBytesHashed = 0L
                 val startTime = System.currentTimeMillis()
                 // Per-pass cache batch: accumulated through the loop and flushed once via
                 // saveEntries (one atomic read-modify-write) instead of saveEntry-per-file
                 // (which did a full load + full rewrite per file -> O(n^2) I/O).
                 val cacheBatch = mutableMapOf<String, QuotaManager.CacheEntry>()
+
+                // Progress is byte-based so one large file still moves the bar.
+                // Files over the scan cap are excluded: they are never read.
+                val config = container.config
+                val totalBytesToHash = allSuspicious.sumOf { path ->
+                    val f = File(path)
+                    if (f.exists() && !config.isTooLargeToScan(f.length())) f.length() else 0L
+                }
+                var lastProgressAt = 0L
+                fun reportHashProgress(bytesDone: Long, fileCount: Int, force: Boolean) {
+                    val now = System.currentTimeMillis()
+                    if (!force && now - lastProgressAt < 200) return
+                    lastProgressAt = now
+                    val elapsed = (now - startTime) / 1000f
+                    val speedMBps = if (elapsed > 0) (bytesDone / (1024.0 * 1024.0)) / elapsed else 0.0
+                    val pct = if (totalBytesToHash > 0) bytesDone.toFloat() / totalBytesToHash
+                        else fileCount.toFloat() / allSuspicious.size
+                    dispatch(AppIntent.HashingProgress(
+                        percent = pct.coerceIn(0f, 1f),
+                        speedMBps = speedMBps.toFloat(),
+                        fileCount = fileCount,
+                        elapsedFormatted = String.format("%.1fs", elapsed)
+                    ))
+                }
 
                 for ((index, filePath) in allSuspicious.withIndex()) {
                     val file = File(filePath)
@@ -167,10 +192,35 @@ class SideEffects(
                     val sizeBytes = file.length()
                     val sizeFormatted = formatFileSize(sizeBytes)
 
+                    // Size gate BEFORE hashing: never read a file VT can't accept,
+                    // and never spend a lookup request on it.
+                    if (config.isTooLargeToScan(sizeBytes)) {
+                        tooLargeCount++
+                        dispatch(AppIntent.LogMessage(
+                            "  Skipped ${file.name} ($sizeFormatted): over the ${config.maxScanSizeMb} MB scan limit"
+                        ))
+                        files.add(FileEntry(
+                            path = filePath,
+                            fileName = file.name,
+                            fileSizeBytes = sizeBytes,
+                            fileSizeFormatted = sizeFormatted,
+                            status = FileStatus.TOO_LARGE,
+                            errorMessage = "Too large to scan (limit ${config.maxScanSizeMb} MB)"
+                        ))
+                        reportHashProgress(totalBytesHashed, index + 1, force = true)
+                        continue
+                    }
+
                     // Compute MD5 + SHA256 in a single pass so SHA256 is
                     // available immediately (not only after a VT report)
                     val hashes = try {
-                        withContext(Dispatchers.IO) { api?.calculateHashes(filePath) }
+                        withContext(Dispatchers.IO) {
+                            api?.calculateHashes(filePath) { bytesRead, _ ->
+                                reportHashProgress(totalBytesHashed + bytesRead, index, force = false)
+                            }
+                        }
+                    } catch (e: CancellationException) {
+                        throw e // Clear/cancel: stop the scan, don't record a hash failure
                     } catch (e: Exception) {
                         logger.warn { "Failed to hash $filePath: ${e.message}" }
                         dispatch(AppIntent.LogMessage("  Warning: could not hash ${file.name}"))
@@ -242,15 +292,7 @@ class SideEffects(
 
                     // Progress
                     totalBytesHashed += sizeBytes
-                    val pct = (index + 1).toFloat() / allSuspicious.size
-                    val elapsed = (System.currentTimeMillis() - startTime).toFloat() / 1000f
-                    val speedMBps = if (elapsed > 0) (totalBytesHashed / (1024.0 * 1024.0)) / elapsed else 0.0
-                    dispatch(AppIntent.HashingProgress(
-                        percent = pct,
-                        speedMBps = speedMBps.toFloat(),
-                        fileCount = index + 1,
-                        elapsedFormatted = String.format("%.1fs", elapsed)
-                    ))
+                    reportHashProgress(totalBytesHashed, index + 1, force = true)
                 }
 
                 // Flush sha256 backfill (no-op when nothing changed)
@@ -261,6 +303,7 @@ class SideEffects(
                     append("Found ${files.size} file(s)")
                     if (cachedCount > 0) append(", $cachedCount cached")
                     if (newCount > 0) append(", $newCount new")
+                    if (tooLargeCount > 0) append(", $tooLargeCount too large")
                     append(String.format(" (%.1fs)", elapsed))
                 }
 
@@ -287,6 +330,8 @@ class SideEffects(
                     scope.launch { refreshStaleEntries(stale) }
                 }
 
+            } catch (e: CancellationException) {
+                throw e // cancelled by Clear or a new drop — not an error
             } catch (e: Exception) {
                 val msg = container.errorHandler.handle(e)
                 dispatch(AppIntent.Error(msg))

@@ -13,6 +13,7 @@ enum class FileStatus {
     ANALYSIS_TIMEOUT,     // Took too long to get analysis results
     ERROR,                // Something went wrong (general)
     HASH_FAILED,          // Failed to compute file hash
+    TOO_LARGE,            // Over the scan size cap — not hashed, not looked up
     UPLOAD_FAILED,        // Failed to upload file to VT
     QUEUED_FOR_RECHECK,   // Scheduled for re-analysis
     RECHECKING;           // Currently re-checking analysis status
@@ -30,6 +31,7 @@ enum class FileStatus {
             ANALYSIS_TIMEOUT -> "Analysis timed out — try again"
             ERROR -> "Error"
             HASH_FAILED -> "Hash failed"
+            TOO_LARGE -> "Too large for VirusTotal — skipped"
             UPLOAD_FAILED -> "Upload failed"
             QUEUED_FOR_RECHECK -> "Recheck queued"
             RECHECKING -> "Rechecking…"
