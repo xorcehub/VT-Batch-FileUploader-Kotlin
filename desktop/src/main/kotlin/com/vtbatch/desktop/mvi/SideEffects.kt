@@ -574,6 +574,9 @@ class SideEffects(
                         status = FileStatus.ERROR,
                         errorMessage = msg
                     )))
+                    // Errors must also land in the status log — the row's red text is
+                    // easy to miss, and a silent-looking failure reads as "button dead".
+                    dispatch(AppIntent.LogMessage("  Upload failed for $fileName: $msg"))
                     container.telemetry.recordUploadFailure()
                 } catch (e: Exception) {
                     val msg = container.errorHandler.handle(e)
@@ -581,6 +584,7 @@ class SideEffects(
                         status = FileStatus.ERROR,
                         errorMessage = msg
                     )))
+                    dispatch(AppIntent.LogMessage("  Upload failed for $fileName: $msg"))
                     container.telemetry.recordUploadFailure()
                 }
 
@@ -1079,9 +1083,20 @@ class SideEffects(
      *  track pending, and start the poll timer. Caller pre-validates API key. */
     private suspend fun requestReanalysisFor(targets: List<FileEntry>) {
         val api = container.virusTotalApi ?: return
-        dispatch(AppIntent.LogMessage("Requesting re-analysis for ${targets.size} file(s)..."))
+        // Re-analyse only works on files VT already knows. Files never uploaded
+        // (HASHED_NOT_FOUND) make the endpoint 404 — skip them instead of firing
+        // a request that can only fail and look like a dead button.
+        val known = targets.filter { it.status != FileStatus.HASHED_NOT_FOUND }
+        val skipped = targets.size - known.size
+        if (skipped > 0) {
+            dispatch(AppIntent.LogMessage(
+                "Skipping $skipped file(s) VirusTotal doesn't know yet — recheck is impossible for them, press Upload instead."
+            ))
+        }
+        if (known.isEmpty()) return
+        dispatch(AppIntent.LogMessage("Requesting re-analysis for ${known.size} file(s)..."))
 
-        for (entry in targets) {
+        for (entry in known) {
             // Flip to QUEUED before any network call so the row's Recheck button
             // disables (spinner) immediately. Otherwise the user can re-fire during
             // the SHA-256 lookup / requestReanalysis round-trip and VT returns 409
@@ -1127,7 +1142,7 @@ class SideEffects(
         }
         container.pendingRecheckTracker.startTimer()
 
-        dispatch(AppIntent.LogMessage("Recheck timer started. ${targets.size} file(s) queued."))
+        dispatch(AppIntent.LogMessage("Recheck timer started. ${known.size} file(s) queued."))
     }
 
     private suspend fun pollRechecks(pending: List<PendingRecheck>) {

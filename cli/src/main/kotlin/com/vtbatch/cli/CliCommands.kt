@@ -45,7 +45,6 @@ data class ApiKeyResolution(val key: String?)
 fun resolveApiKey(cliKey: String?): ApiKeyResolution {
     val key = cliKey
         ?: System.getenv("VT_API_KEY")
-        ?: System.getenv("API_KEY")
     return ApiKeyResolution(key)
 }
 
